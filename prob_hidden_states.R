@@ -47,24 +47,50 @@ compute_emission_probs <- function()
   return(list("emission_bot" = emission_bot, "emission_user" = emission_user))
 }
 
-#Compute the values of P(X_t = 'Bot'/Y_{1:(t-1)}), given the initial probabilities, transition probabilities and emission probabilities, 
-#using the dynamic programming algorithm discussed by Nando de Freitas
-optimal_filtering <- function(emission_bot, emission_user)
+get_data_single_client <- function(client_ip)
 {
-  cat(paste("nrow(emission_bot) = ", nrow(emission_bot), "\n"))
-  cat(paste("nrow(emission_user) = ", nrow(emission_user), "\n"))
-  #Get the HTTP requests (observed states) for the user with max sessions
+  #Get the HTTP requests (observed states) for the IP with max sessions
   con <- dbConnect(PostgreSQL(), user="postgres", password = "impetus123",  
                    host = "localhost", port="5432", dbname = "cleartrail")
   statement <- paste("select i.browsingsessionid, i.MarkedCategory, hr.urlids as urlid
                       from interesting_sessions i, http_requests hr
                       where i.ClientIPServerIP = hr.ClientIPServerIP
                       and i.browsingsessionid = hr.browsingsessionid
-                      and client_ip = '192.168.50.219'
-                      order by i.browsingsessionid, hr.timestamp", sep = "")
+                      and client_ip = '", client_ip, "'", 
+                      " order by i.browsingsessionid, hr.timestamp", sep = "")
   res <- dbSendQuery(con, statement);
   req_seq <- fetch(res, n = -1)
- 
+  dbDisconnect(con)
+  return(req_seq)
+}
+
+get_data_all_clients <- function()
+{
+  #Get the HTTP requests (observed states) for all IPs
+  con <- dbConnect(PostgreSQL(), user="postgres", password = "impetus123",  
+                   host = "localhost", port="5432", dbname = "cleartrail")
+  statement <- paste("select i.client_ip, i.browsingsessionid, i.MarkedCategory, hr.urlids as urlid
+                      from interesting_sessions i, http_requests hr
+                      where i.ClientIPServerIP = hr.ClientIPServerIP
+                      and i.browsingsessionid = hr.browsingsessionid
+                      order by i.client_ip, i.browsingsessionid, hr.timestamp", sep = "")
+  res <- dbSendQuery(con, statement);
+  req_seq <- fetch(res, n = -1)
+  dbDisconnect(con)
+  return(req_seq)
+}
+
+
+#Compute the values of P(X_t = 'Bot'/Y_{1:(t-1)}), given the initial probabilities, transition probabilities and emission probabilities, 
+#using the dynamic programming algorithm discussed by Nando de Freitas
+optimal_filtering <- function(emission_bot, emission_user)
+{
+  cat(paste("nrow(emission_bot) = ", nrow(emission_bot), "\n"))
+  cat(paste("nrow(emission_user) = ", nrow(emission_user), "\n"))
+  
+  #req_seq <- get_data_single_client('192.168.50.219')
+  req_seq <- get_data_all_clients()
+
   #State prediction (P(X_t/Y_{1:(t-1)})) and Bayesian update (P(X_t/Y_{1:t})) go alternatively, and each 
   #provide input to the other
 
@@ -101,17 +127,17 @@ optimal_filtering <- function(emission_bot, emission_user)
   }
   #known_bot_sessions <- subset(req_seq, (markedcategory == 'Bot'))
   #print(known_bot_sessions)
-  dbDisconnect(con) 
+   
   return(req_seq)
 }
 
-#The number of sessions where estimated probability of a bot session ever reached 0.5 was 42. This is 49% of total sessions (86).
-#The one bot session does raise an alarm. 
+#Taking the sessions and HTTP requests of client_ip = 192.168.50.219 only, the number of sessions where estimated probability of a bot session ever reached 0.5 was 42. 
+#This is 49% of total sessions (86). The one bot session does raise an alarm. 
 visualize_hidden_state_probabilities <- function(req_seq)
 {
   req_seq <- req_seq[, c("markedcategory", "bayes_update_bot")]
   req_seq$sequence_no <- 1:nrow(req_seq)
-  png(file = "./figures/bot_session_probabilities.png", width = 1000, height = 600)
+  png(file = "./figures/filtering_probabilities.png", width = 1000, height = 600)
   p <- ggplot(req_seq, aes(x = sequence_no, y = bayes_update_bot, fill = markedcategory)) + geom_bar(stat="identity", binwidth = 1) + 
          theme(axis.text = element_text(colour = 'blue', size = 14, face = 'bold')) +
          theme(axis.text.x = element_text(angle = 90)) +
@@ -125,4 +151,5 @@ call_all <- function()
   probabilities <- compute_emission_probs()
   req_seq <- optimal_filtering(probabilities[["emission_bot"]], probabilities[["emission_user"]])
   visualize_hidden_state_probabilities(req_seq)
+  return(req_seq)
 }
