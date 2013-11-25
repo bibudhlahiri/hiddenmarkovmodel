@@ -2,6 +2,8 @@ library(RPostgreSQL)
 init_probs <- c(0.73, 0.27)
 
 trans_probs <- matrix(c(0.88, 0.12, 0.31, 0.69), nrow = 2, byrow = TRUE)
+rownames(trans_probs) <- c('User', 'Bot')
+colnames(trans_probs) <- c('User', 'Bot')
 
 compute_emission_probs <- function()
 {
@@ -62,36 +64,44 @@ predict_hidden_state_probabilities <- function(emission_bot, emission_user)
                       order by i.browsingsessionid, hr.timestamp", sep = "")
   res <- dbSendQuery(con, statement);
   req_seq <- fetch(res, n = -1)
-  
+ 
+  #State prediction (P(X_t/Y_{1:(t-1)})) and Bayesian update (P(X_t/Y_{1:t})) go alternatively, and each 
+  #provide input to the other
+
+  #We start by first round of Bayesian update  
   p_x_1_bot <- init_probs[2]
   p_y1_given_x1_bot <- (subset(emission_bot, (emission_bot$urlid == req_seq[1, "urlid"])))$probability
 
   p_x_1_user <- init_probs[1]
   p_y1_given_x1_user <- (subset(emission_user, (emission_user$urlid == req_seq[1, "urlid"])))$probability
-
  
-  posterior_prob_bot <- p_x_1_bot*p_y1_given_x1_bot/(p_x_1_bot*p_y1_given_x1_bot + p_x_1_user*p_y1_given_x1_user)
-  posterior_prob_user <- p_x_1_user*p_y1_given_x1_user/(p_x_1_bot*p_y1_given_x1_bot + p_x_1_user*p_y1_given_x1_user)
+  bayes_update_bot <- p_x_1_bot*p_y1_given_x1_bot/(p_x_1_bot*p_y1_given_x1_bot + p_x_1_user*p_y1_given_x1_user)
+  bayes_update_user <- p_x_1_user*p_y1_given_x1_user/(p_x_1_bot*p_y1_given_x1_bot + p_x_1_user*p_y1_given_x1_user)
 
-  cat(paste("req_seq[1, urlid] = ", req_seq[1, "urlid"], ", p_x_1_bot = ", p_x_1_bot, ", p_y1_given_x1_bot = ", p_y1_given_x1_bot, 
-            ", p_x_1_user = ", p_x_1_user, ", p_y1_given_x1_user = ", p_y1_given_x1_user, ", posterior_prob_bot = ", posterior_prob_bot, 
-            ", posterior_prob_user = ", posterior_prob_user, "\n", sep = ""))
-  req_seq[1, "posterior_prob_bot"] <- posterior_prob_bot
-  req_seq[1, "posterior_prob_user"] <- posterior_prob_user
-
+  req_seq[1, "bayes_update_bot"] <- bayes_update_bot
+  req_seq[1, "bayes_update_user"] <- bayes_update_user
 
   T <- nrow(req_seq)
   for (t in 2:T)
   {
+    #First do state prediction, then use it for Bayesian update, and repeat that in loop
+    #Add the terms for X_{t-1} = 'User' and X_{t-1} = 'Bot'
+    state_prediction_bot <- trans_probs["User", "Bot"]*req_seq[(t-1), "bayes_update_user"] + trans_probs["Bot", "Bot"]*req_seq[(t-1), "bayes_update_bot"]
+    req_seq[t, "state_prediction_bot"] <- state_prediction_bot
+
+    state_prediction_user <- trans_probs["User", "User"]*req_seq[(t-1), "bayes_update_user"] + trans_probs["Bot", "User"]*req_seq[(t-1), "bayes_update_bot"]
+    req_seq[t, "state_prediction_user"] <- state_prediction_user
+
     p_yt_given_xt_bot <- (subset(emission_bot, (emission_bot$urlid == req_seq[t, "urlid"])))$probability
     p_yt_given_xt_user <- (subset(emission_user, (emission_user$urlid == req_seq[t, "urlid"])))$probability
-    posterior_prob_bot <- p_yt_given_xt_bot*req_seq[(t-1), "posterior_prob_bot"]/(p_yt_given_xt_bot*req_seq[(t-1), "posterior_prob_bot"] + p_yt_given_xt_user*req_seq[(t-1), "posterior_prob_user"])
-    posterior_prob_user <- p_yt_given_xt_user*req_seq[(t-1), "posterior_prob_user"]/(p_yt_given_xt_bot*req_seq[(t-1), "posterior_prob_bot"] + p_yt_given_xt_user*req_seq[(t-1), "posterior_prob_user"])
-    req_seq[t, "posterior_prob_bot"] <- posterior_prob_bot
-    req_seq[t, "posterior_prob_user"] <- posterior_prob_user
+    bayes_update_bot <- p_yt_given_xt_bot*req_seq[t, "state_prediction_bot"]/(p_yt_given_xt_bot*req_seq[t, "state_prediction_bot"] + p_yt_given_xt_user*req_seq[t, "state_prediction_user"])
+    bayes_update_user <- p_yt_given_xt_user*req_seq[t, "state_prediction_user"]/(p_yt_given_xt_bot*req_seq[t, "state_prediction_bot"] + p_yt_given_xt_user*req_seq[t, "state_prediction_user"])
+    req_seq[t, "bayes_update_bot"] <- bayes_update_bot
+    req_seq[t, "bayes_update_user"] <- bayes_update_user
   }
-  known_bot_sessions <- subset(req_seq, (markedcategory == 'Bot'))
-  print(known_bot_sessions)
+  #known_bot_sessions <- subset(req_seq, (markedcategory == 'Bot'))
+  #print(known_bot_sessions)
+  print(req_seq)
   dbDisconnect(con) 
 }
 
