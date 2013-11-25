@@ -49,7 +49,7 @@ compute_emission_probs <- function()
 
 #Compute the values of P(X_t = 'Bot'/Y_{1:(t-1)}), given the initial probabilities, transition probabilities and emission probabilities, 
 #using the dynamic programming algorithm discussed by Nando de Freitas
-predict_hidden_state_probabilities <- function(emission_bot, emission_user)
+optimal_filtering <- function(emission_bot, emission_user)
 {
   cat(paste("nrow(emission_bot) = ", nrow(emission_bot), "\n"))
   cat(paste("nrow(emission_user) = ", nrow(emission_user), "\n"))
@@ -101,13 +101,28 @@ predict_hidden_state_probabilities <- function(emission_bot, emission_user)
   }
   #known_bot_sessions <- subset(req_seq, (markedcategory == 'Bot'))
   #print(known_bot_sessions)
-  print(req_seq)
   dbDisconnect(con) 
+  return(req_seq)
+}
+
+#The number of sessions where estimated probability of a bot session ever reached 0.5 was 42. This is 49% of total sessions (86).
+#The one bot session does raise an alarm. 
+visualize_hidden_state_probabilities <- function(req_seq)
+{
+  req_seq <- req_seq[, c("markedcategory", "bayes_update_bot")]
+  req_seq$sequence_no <- 1:nrow(req_seq)
+  png(file = "./figures/bot_session_probabilities.png", width = 1000, height = 600)
+  p <- ggplot(req_seq, aes(x = sequence_no, y = bayes_update_bot, fill = markedcategory)) + geom_bar(stat="identity", binwidth = 1) + 
+         theme(axis.text = element_text(colour = 'blue', size = 14, face = 'bold')) +
+         theme(axis.text.x = element_text(angle = 90)) +
+         theme(axis.title = element_text(colour = 'red', size = 14, face = 'bold'))
+  print(p)
+  dev.off() 
 }
 
 call_all <- function()
 {
   probabilities <- compute_emission_probs()
-  print(class(probabilities))
-  predict_hidden_state_probabilities(probabilities[["emission_bot"]], probabilities[["emission_user"]])
+  req_seq <- optimal_filtering(probabilities[["emission_bot"]], probabilities[["emission_user"]])
+  visualize_hidden_state_probabilities(req_seq)
 }
