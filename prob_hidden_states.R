@@ -44,12 +44,15 @@ compute_emission_probs <- function()
   emission_user <- merge(x = interesting_urls, y = emission_user, all.x = TRUE, by.x = "urlid", by.y = "urlid")
   emission_user[is.na(emission_user)] <- 0
   dbDisconnect(con) 
+  
+  cat(paste("nrow(emission_bot) = ", nrow(emission_bot), "\n"))
+  cat(paste("nrow(emission_user) = ", nrow(emission_user), "\n"))
+
   return(list("emission_bot" = emission_bot, "emission_user" = emission_user))
 }
 
 get_data_single_client <- function(client_ip)
 {
-  #Get the HTTP requests (observed states) for the IP with max sessions
   con <- dbConnect(PostgreSQL(), user="postgres", password = "impetus123",  
                    host = "localhost", port="5432", dbname = "cleartrail")
   statement <- paste("select i.browsingsessionid, i.MarkedCategory, hr.urlids as urlid
@@ -83,14 +86,9 @@ get_data_all_clients <- function()
 
 #Compute the values of P(X_t = 'Bot'/Y_{1:(t-1)}), given the initial probabilities, transition probabilities and emission probabilities, 
 #using the dynamic programming algorithm discussed by Nando de Freitas
-optimal_filtering <- function(emission_bot, emission_user)
+optimal_filtering <- function(emission_bot, emission_user, req_seq)
 {
-  cat(paste("nrow(emission_bot) = ", nrow(emission_bot), "\n"))
-  cat(paste("nrow(emission_user) = ", nrow(emission_user), "\n"))
-  
-  #req_seq <- get_data_single_client('192.168.50.219')
-  req_seq <- get_data_all_clients()
-
+    
   #State prediction (P(X_t/Y_{1:(t-1)})) and Bayesian update (P(X_t/Y_{1:t})) go alternatively, and each 
   #provide input to the other
 
@@ -149,7 +147,67 @@ visualize_hidden_state_probabilities <- function(req_seq)
 call_all <- function()
 {
   probabilities <- compute_emission_probs()
-  req_seq <- optimal_filtering(probabilities[["emission_bot"]], probabilities[["emission_user"]])
-  visualize_hidden_state_probabilities(req_seq)
+  #192.168.50.93 has 13 bot sessions and 14 user sessions: the one with most even distribution of bot and user sessions
+  #192.168.50.219 has max number of total sessions
+  req_seq <- get_data_single_client('192.168.50.93')
+  #req_seq <- get_data_all_clients()
+  req_seq <- optimal_filtering(probabilities[["emission_bot"]], probabilities[["emission_user"]], req_seq)
+  #visualize_hidden_state_probabilities(req_seq)
   return(req_seq)
 }
+
+measure_perf_all_IPs <- function()
+{ 
+  con <- dbConnect(PostgreSQL(), user="postgres", password = "impetus123",  
+                   host = "localhost", port="5432", dbname = "cleartrail")
+  statement <- paste("select client_ip, 
+                      count(distinct browsingsessionid) n_sessions, 
+                      sum(case when markedcategory = 'User' then 1 else 0 end) as n_user_sessions,
+                      sum(case when markedcategory = 'Bot' then 1 else 0 end) as n_bot_sessions
+                      from interesting_sessions
+                      --where client_ip = '192.168.50.93' 
+                      group by client_ip
+                      having count(distinct browsingsessionid) >= 10
+                      order by count(distinct browsingsessionid) desc", sep = "")
+  res <- dbSendQuery(con, statement);
+  major_ips <- fetch(res, n = -1)
+  n_major_ips <- nrow(major_ips)
+  threshold_prob <- 0.5
+  probabilities <- compute_emission_probs()
+  for (i in 1:n_major_ips)
+  {
+    cat(paste("Processing IP ", major_ips[i, "client_ip"], "\n", sep = "")) 
+    req_seq <- get_data_single_client(major_ips[i, "client_ip"])
+    req_seq <- optimal_filtering(probabilities[["emission_bot"]], probabilities[["emission_user"]], req_seq)
+    req_seq$raise_alarm <- as.numeric(req_seq$bayes_update_bot >= threshold_prob)
+
+    session_alarms <- aggregate(x = req_seq$raise_alarm, by = list(req_seq$browsingsessionid), FUN = sum, na.rm = TRUE) 
+    colnames(session_alarms) <- c("browsingsessionid", "raise_alarm")
+    session_alarms$raise_alarm <- as.numeric(session_alarms$raise_alarm > 0)
+
+    session_labels <- unique(req_seq[, c('browsingsessionid', 'markedcategory')])
+    session_labels_alarms <- merge(x = session_labels, y = session_alarms)
+
+    session_labels_alarms$false_positives <- as.numeric((session_labels_alarms$markedcategory == 'User') & (session_labels_alarms$raise_alarm == 1))
+    session_labels_alarms$false_negatives <- as.numeric((session_labels_alarms$markedcategory == 'Bot') & (session_labels_alarms$raise_alarm == 0))
+
+    false_negatives <- sum(session_labels_alarms$false_negatives)
+    false_positives <- sum(session_labels_alarms$false_positives)
+    fpr <- 0
+    if (major_ips[i, "n_user_sessions"] > 0)
+    {
+      fpr <- false_positives/major_ips[i, "n_user_sessions"]
+    }
+    fnr <- 0
+    if (major_ips[i, "n_bot_sessions"] > 0)
+    {
+      fnr <- false_negatives/major_ips[i, "n_bot_sessions"]
+    }
+    cat(paste("n_sessions = ", major_ips[i, "n_sessions"], ", n_user_sessions = ", major_ips[i, "n_user_sessions"], 
+              ", n_bot_sessions = ", major_ips[i, "n_bot_sessions"], ", fpr = ", fpr, ", fnr = ", fnr, "\n", sep = ""))
+    major_ips[i, "fpr"] <- fpr
+    major_ips[i, "fnr"] <- fnr
+  }
+  dbDisconnect(con)
+  return(major_ips)
+} 
