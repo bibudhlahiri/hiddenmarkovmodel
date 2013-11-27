@@ -1,4 +1,5 @@
 library(RPostgreSQL)
+library(ggplot2)
 init_probs <- c(0.73, 0.27)
 
 trans_probs <- matrix(c(0.88, 0.12, 0.31, 0.69), nrow = 2, byrow = TRUE)
@@ -55,7 +56,7 @@ get_data_single_client <- function(client_ip)
 {
   con <- dbConnect(PostgreSQL(), user="postgres", password = "impetus123",  
                    host = "localhost", port="5432", dbname = "cleartrail")
-  statement <- paste("select i.browsingsessionid, i.MarkedCategory, hr.urlids as urlid
+  statement <- paste("select i.client_ip, i.browsingsessionid, i.MarkedCategory, hr.urlids as urlid
                       from interesting_sessions i, http_requests hr
                       where i.ClientIPServerIP = hr.ClientIPServerIP
                       and i.browsingsessionid = hr.browsingsessionid
@@ -210,4 +211,121 @@ measure_perf_all_IPs <- function()
   }
   dbDisconnect(con)
   return(major_ips)
+}
+
+#Get an aggregate value of sensitivity (recall) and FPR (1 - specificity) across all client IPs,
+#for each value of threshold. Vary the threshold to complete the curve. 
+get_roc_curve_data <- function()
+{
+  con <- dbConnect(PostgreSQL(), user="postgres", password = "impetus123",  
+                   host = "localhost", port="5432", dbname = "cleartrail")
+  statement <- paste("select client_ip, 
+                      count(distinct browsingsessionid) n_sessions, 
+                      sum(case when markedcategory = 'User' then 1 else 0 end) as n_user_sessions,
+                      sum(case when markedcategory = 'Bot' then 1 else 0 end) as n_bot_sessions
+                      from interesting_sessions
+                      --where client_ip in ('192.168.50.93', '192.168.50.219')
+                      --where client_ip = '192.168.50.219'
+                      group by client_ip
+                      having count(distinct browsingsessionid) >= 10
+                      order by count(distinct browsingsessionid) desc", sep = "")
+  res <- dbSendQuery(con, statement);
+  major_ips <- fetch(res, n = -1)
+  n_major_ips <- nrow(major_ips)
+  #threshold_probs <- seq(5, 9)/10
+  threshold_probs <- c(0.5, 0.6, 0.7, 0.72, 0.74, 0.76, 0.78, 0.8, 0.9)
+  #threshold_probs <- c(0.5)
+  probabilities <- compute_emission_probs()
+
+  #Combine req_seq returned by optimal_filtering for all client IPs. This combined req_seq will be 
+  #iterated over for diff values of threshold_prob to obtain sensitivity and FPR values.
+  req_seq_combined <- data.frame()
+  for (i in 1:n_major_ips)
+  {
+    cat(paste("Processing IP ", major_ips[i, "client_ip"], "\n", sep = ""))
+    req_seq <- get_data_single_client(major_ips[i, "client_ip"])
+    req_seq <- optimal_filtering(probabilities[["emission_bot"]], probabilities[["emission_user"]], req_seq)
+    req_seq <- req_seq[, c("client_ip", "browsingsessionid", "markedcategory", "bayes_update_bot")]
+    req_seq_combined <- rbind(req_seq_combined, req_seq)
+  }
+
+  roc_curve_data <- data.frame()
+  j <-1 
+
+  for (threshold_prob in threshold_probs) 
+  {
+     req_seq_combined$raise_alarm <- as.numeric(req_seq_combined$bayes_update_bot >= threshold_prob) 
+     session_alarms <- aggregate(x = req_seq_combined$raise_alarm, by = list(req_seq_combined$client_ip, req_seq_combined$browsingsessionid), FUN = sum, na.rm = TRUE) 
+     colnames(session_alarms) <- c("client_ip", "browsingsessionid", "raise_alarm")
+     session_alarms$raise_alarm <- as.numeric(session_alarms$raise_alarm > 0)
+
+     session_labels <- unique(req_seq_combined[, c('client_ip', 'browsingsessionid', 'markedcategory')])
+     session_labels_alarms <- merge(x = session_labels, y = session_alarms)
+
+     session_labels_alarms$false_positives <- as.numeric((session_labels_alarms$markedcategory == 'User') & (session_labels_alarms$raise_alarm == 1))
+     session_labels_alarms$false_negatives <- as.numeric((session_labels_alarms$markedcategory == 'Bot') & (session_labels_alarms$raise_alarm == 0))
+
+     false_negatives <- sum(session_labels_alarms$false_negatives)
+     false_positives <- sum(session_labels_alarms$false_positives)
+     fpr <- 0
+     n_user_sessions <- sum(major_ips$n_user_sessions)
+     if (n_user_sessions > 0)
+     {
+      fpr <- false_positives/n_user_sessions
+     }
+     fnr <- 0
+     n_bot_sessions <- sum(major_ips$n_bot_sessions)
+     if (n_bot_sessions > 0)
+     {
+      fnr <- false_negatives/n_bot_sessions
+     }
+     cat(paste("threshold_prob = ", threshold_prob, ", n_user_sessions = ", n_user_sessions, 
+              ", n_bot_sessions = ", n_bot_sessions, ", fpr = ", fpr, ", fnr = ", fnr, "\n", sep = ""))
+     roc_curve_data[j, "threshold_prob"] <- threshold_prob
+     roc_curve_data[j, "fpr"] <- fpr
+     roc_curve_data[j, "tpr"] <- 1 - fnr
+     j <- j + 1
+  }
+  dbDisconnect(con)
+  return(roc_curve_data)
 } 
+
+draw_roc_curve1 <- function(roc_curve_data)
+{
+  png(file = "./figures/roc.png", width = 800, height = 600)
+  p <- ggplot(roc_curve_data, aes(x = fpr, y = tpr)) + geom_line(position="dodge") + 
+         labs(x = "False Positive Rate") + labs(y = "Sensitivity") + 
+         theme(axis.text = element_text(colour = 'blue', size = 14, face = 'bold')) +
+         theme(axis.title = element_text(colour = 'red', size = 14, face = 'bold'))
+  print(p)
+  dev.off()
+  cat(paste("AUC = ", compute_AUC(roc_curve_data), "\n", sep = "")) 
+}
+
+draw_roc_curve <- function(roc_curve_data)
+{
+  library(calibrate)
+  AUC <- compute_AUC(roc_curve_data)
+  png(file = "./figures/roc.png", width = 800, height = 600)
+  plot(roc_curve_data$fpr, roc_curve_data$tpr, type = "b", xlab = "FPR (1-specificity)",
+            ylab = "TPR (sensitivity)", 
+           #main = paste("AUC = ", round(AUC, 2), sep = "")
+      );
+  abline(a = 0, b = 1);
+  textxy(roc_curve_data$fpr, roc_curve_data$tpr, roc_curve_data$threshold_prob, cex = 1.0);
+  dev.off();
+}
+
+
+compute_AUC <- function(fpr_tpr_values)
+{
+  n_fpr_tpr_values <- nrow(fpr_tpr_values);
+  AUC <- 0;
+  for (i in 1:(n_fpr_tpr_values-1))
+  {
+    AUC <- AUC + 0.5*(fpr_tpr_values[i, "tpr"] + fpr_tpr_values[i+1, "tpr"])*
+                        (fpr_tpr_values[i, "fpr"] - fpr_tpr_values[i+1, "fpr"]);
+  }
+ return(AUC);
+}
+
