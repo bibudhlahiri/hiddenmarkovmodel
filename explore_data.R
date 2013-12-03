@@ -27,6 +27,8 @@ prepare_data <- function()
   ubs <- read.csv("/Users/blahiri/cleartrail_ddos/data/WebServerDDoSDataSet/UserBrowsingsSession_MarkedSessions.csv", header = TRUE)
   ubs <- subset(ubs, (MarkedCategory == 'User') | (MarkedCategory == 'Bot'))
   cat(paste("nrow(ubs) = ", nrow(ubs), "\n", sep = ""))
+  ubs$MarkedCategory = factor(ubs$MarkedCategory)
+  levels(ubs$MarkedCategory) = c('User', 'Bot')
   print(table(ubs$MarkedCategory))
   #weights <- ifelse(ubs$change_type == 'increased', 6, 1)
   ubs
@@ -68,4 +70,39 @@ random_forest <- function(ubs)
 
   ubs$predicted <-  ubs.rf$predicted
   print(table(ubs[,"MarkedCategory"], ubs[, "predicted"], dnn = list('actual', 'predicted')))
+
+  bot_sessions <- subset(ubs, MarkedCategory == 'Bot')
+  user_sessions <- subset(ubs, MarkedCategory == 'User')
+
+  #AvgQueryParameters is on average 3 times higher for bot sessions, considering the mean
+  print(summary(bot_sessions$AvgQueryParameters))
+  #Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+  #0.0000  0.5405  0.7381  0.7422  0.9492  2.2170 
+  
+  print(summary(user_sessions$AvgQueryParameters))
+  #Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+  #0.0000  0.0000  0.0000  0.2554  0.2624  3.2220
+
+  print(summary(bot_sessions$RequestRatePerSec))
+  #Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+  #0.0000  0.1538  0.5032  1.6270  1.8430 30.6700 
+  print(summary(user_sessions$RequestRatePerSec))
+  #Min.  1st Qu.   Median     Mean  3rd Qu.     Max. 
+  #0.00000  0.01929  0.03691  0.65170  0.10430 67.54000
+
+  print(summary(bot_sessions$AvgHttpReqLen))
+  #Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+  #240.3  1025.0  1318.0  1254.0  1505.0  3010.0
+  print(summary(user_sessions$AvgHttpReqLen))
+  #Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+  #195.4   211.1   713.5   911.3  1480.0  8537.0
+
+  print(summary(bot_sessions$PercentConsecutiveUrls))
+  #Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+  #0.000   0.000   3.279  10.060  13.920  97.560
+  print(summary(user_sessions$PercentConsecutiveUrls))
+  #Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+  #0.00    0.00   66.67   54.87   96.88  100.00 
+
+  ubs.rf
 }
