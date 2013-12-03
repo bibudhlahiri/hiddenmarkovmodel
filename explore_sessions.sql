@@ -261,12 +261,16 @@ and not exists (select 1 from browsing_sessions bs3
 select sum(b.freq)
 from 
 (select hr.urlids as urlid, cast(count(*) as real)/72313 as freq
-from interesting_sessions i, http_requests hr
-where i.ClientIPServerIP = hr.ClientIPServerIP
-and i.browsingsessionid = hr.browsingsessionid
-and i.MarkedCategory = 'Bot'
-group by hr.urlids
-order by hr.urlids) b
+ from interesting_sessions i, http_requests hr
+ where i.ClientIPServerIP = hr.ClientIPServerIP
+ and i.browsingsessionid = hr.browsingsessionid
+ and i.MarkedCategory = 'Bot'
+ and hr.urlids in (1, 3501, 3498, 3499, 20, 38, 4297, 3496, 
+ 47, 44, 58, 24, 59, 61, 63, 65, 62, 4433, 4434, 4770, 4435, 
+ 4436, 4683, 4684, 4438, 4439, 4764, 4440, 4765, 4443, 4444, 
+ 4767, 4448, 4768)
+ group by hr.urlids
+ order by hr.urlids) b
 
 --72,313
 select sum(a.n)
@@ -354,7 +358,100 @@ select i.browsingsessionid, i.MarkedCategory, hr.urlids as urlid
 from interesting_sessions i, http_requests hr
 where i.ClientIPServerIP = hr.ClientIPServerIP
 and i.browsingsessionid = hr.browsingsessionid
-and client_ip = '192.168.50.219'
+and client_ip = '192.168.50.93'
 order by i.browsingsessionid, hr.timestamp
 
+select i.client_ip, i.browsingsessionid, i.MarkedCategory, hr.urlids as urlid
+from interesting_sessions i, http_requests hr
+where i.ClientIPServerIP = hr.ClientIPServerIP
+and i.browsingsessionid = hr.browsingsessionid
+order by i.client_ip, i.browsingsessionid, hr.timestamp
 
+--62 distinct client IPs, 34 have some bot sessions
+select distinct(client_ip)
+from interesting_sessions
+where markedcategory = 'Bot'
+
+select distinct(client_ip)
+from interesting_sessions
+where markedcategory = 'User'
+
+--IP with highest bot sessions
+select client_ip, count(distinct browsingsessionid)
+from interesting_sessions
+where markedcategory = 'Bot'
+group by client_ip
+order by count(distinct browsingsessionid) desc
+
+--37 sessions, 34 bot
+select *
+from interesting_sessions
+where client_ip = '192.168.50.92'
+and markedcategory = 'Bot'
+
+
+
+select client_ip, 
+count(distinct browsingsessionid) n_sessions, 
+sum(case when markedcategory = 'User' then 1 else 0 end) as n_user_sessions,
+sum(case when markedcategory = 'Bot' then 1 else 0 end) as n_bot_sessions
+from interesting_sessions
+--where client_ip = '192.168.50.93'
+group by client_ip
+having count(distinct browsingsessionid) >= 10
+order by count(distinct browsingsessionid) desc
+
+
+select clientip, count(*)
+from http_requests
+group by clientip
+order by count(*)
+
+--Markov transition matrix among URLs for user sessions
+explain
+select hr1.urlids, hr2.urlids, count(*)
+--bs.ClientIPServerIP, bs.browsingsessionid, hr1.urlids, hr2.urlids
+from browsing_sessions bs, http_requests hr1, http_requests hr2
+where bs.ClientIPServerIP = hr1.ClientIPServerIP
+and bs.browsingsessionid = hr1.browsingsessionid
+and hr1.ClientIPServerIP = hr2.ClientIPServerIP
+and hr1.browsingsessionid = hr2.browsingsessionid
+and hr2.timestamp > hr1.timestamp
+and bs.MarkedCategory = 'User'
+and not exists (select 1 from http_requests hr3
+                where hr3.ClientIPServerIP = hr2.ClientIPServerIP
+                and hr3.browsingsessionid = hr2.browsingsessionid
+                and hr3.timestamp > hr1.timestamp
+                and hr3.timestamp < hr2.timestamp)
+group by hr1.urlids, hr2.urlids
+order by count(*) desc
+--bs.ClientIPServerIP, bs.browsingsessionid, hr1.timestamp, hr2.timestamp
+
+select hr1.urlids, hr2.urlids, count(*)
+--bs.ClientIPServerIP, bs.browsingsessionid, hr1.urlids, hr2.urlids
+from browsing_sessions bs, http_requests hr1, http_requests hr2
+where bs.ClientIPServerIP = hr1.ClientIPServerIP
+and bs.browsingsessionid = hr1.browsingsessionid
+and hr1.ClientIPServerIP = hr2.ClientIPServerIP
+and hr1.browsingsessionid = hr2.browsingsessionid
+and hr2.timestamp > hr1.timestamp
+and bs.MarkedCategory = 'Bot'
+and not exists (select 1 from http_requests hr3
+                where hr3.ClientIPServerIP = hr2.ClientIPServerIP
+                and hr3.browsingsessionid = hr2.browsingsessionid
+                and hr3.timestamp > hr1.timestamp
+                and hr3.timestamp < hr2.timestamp)
+group by hr1.urlids, hr2.urlids
+order by count(*) desc
+
+
+select *
+from transition_raw_user_sessions
+order by url1, frequency desc
+
+
+select trus1.url1, trus1.url2, cast(trus1.frequency as real)/(select sum(trus2.frequency) from transition_raw_user_sessions trus2 where trus2.url1 = trus1.url1)
+from transition_raw_user_sessions trus1
+order by trus1.url1, trus1.frequency desc
+
+                
