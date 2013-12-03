@@ -23,11 +23,14 @@ select count(*)
 from browsing_sessions;
 
 alter table browsing_sessions
-add column client_ip  varchar(100);
+add column client_ip varchar(100);
 
 update browsing_sessions
 set client_ip = substring(ClientIPServerIP from 1 for position('_' in ClientIPServerIP) - 1)
 where position('_' in ClientIPServerIP) > 0;
+
+CREATE INDEX idx_browsing_sessions_clientIPserverIP on browsing_sessions (ClientIPServerIP);
+CREATE INDEX idx_browsing_sessions_browsingsessionID on browsing_sessions (BrowsingSessionID);
 ----------------------------------------------
 drop table if exists http_requests;
 create table http_requests
@@ -65,6 +68,9 @@ WITH CSV HEADER DELIMITER ','  ENCODING 'ISO_8859_5';
 select count(*) 
 from http_requests;
 
+CREATE INDEX idx_http_requests_clientIPserverIP on http_requests (ClientIPServerIP);
+CREATE INDEX idx_http_requests_browsingsessionID on http_requests (BrowsingSessionID);
+
 /*create sequence http_request_id_seq;
 ALTER TABLE http_requests add COLUMN id bigint;
 ALTER TABLE http_requests ALTER COLUMN id SET DEFAULT nextval('http_request_id_seq');
@@ -74,3 +80,19 @@ delete from http_requests
 select *
 from http_requests
 limit 5*/
+--------------------------------------------------
+
+drop table if exists transition_raw_user_sessions;
+create table transition_raw_user_sessions
+( 
+  url1 integer,
+  url2 integer,
+  frequency integer
+);
+
+copy transition_raw_user_sessions
+from '/Users/blahiri/cleartrail_ddos/data/transition_raw_user_sessions.csv' 
+WITH CSV HEADER DELIMITER ','  ENCODING 'ISO_8859_5';
+
+select count(*)
+from transition_raw_user_sessions;
