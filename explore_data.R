@@ -29,8 +29,6 @@ prepare_data <- function()
   cat(paste("nrow(ubs) = ", nrow(ubs), "\n", sep = ""))
   ubs$MarkedCategory = factor(ubs$MarkedCategory)
   levels(ubs$MarkedCategory) = c('User', 'Bot')
-  print(table(ubs$MarkedCategory))
-  #weights <- ifelse(ubs$change_type == 'increased', 6, 1)
   ubs
 }
 
@@ -102,7 +100,11 @@ random_forest <- function(ubs)
   #0.000   0.000   3.279  10.060  13.920  97.560
   print(summary(user_sessions$PercentConsecutiveUrls))
   #Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
-  #0.00    0.00   66.67   54.87   96.88  100.00 
+  #0.00    0.00   66.67   54.87   96.88  100.00
 
-  ubs.rf
+  png(file = "./figures/rf_variable_importance.png", width = 800, height = 600)
+  varImpPlot(ubs.rf)
+  dev.off() 
+
+  return(ubs.rf)
 }
