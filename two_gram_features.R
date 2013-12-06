@@ -69,13 +69,18 @@ fit_model <- function()
   all_data <- prepare_data()
   sparse_mat <- all_data[["sparse_mat"]]
   session_labels <- all_data[["session_labels"]]
-  session_labels$category <- ifelse(session_labels$markedcategory == 'Bot', 1, 0)
-  trg_model <- train_validate_test(sparse_mat, session_labels$category)
+ 
+  #For SVM 1 and -1. For LR, 1 and 0.
+  #session_labels$category <- ifelse(session_labels$markedcategory == 'Bot', 1, -1)
+
+  #trg_model <- train_validate_test_lr(sparse_mat, session_labels$category)
+  session_labels$markedcategory <- as.factor(session_labels$markedcategory)
+  trg_model <- train_validate_test_svm(sparse_mat, session_labels$markedcategory)
   return(trg_model)
  }
 
 
-train_validate_test <- function(x, y)
+train_validate_test_lr <- function(x, y)
 {
   set.seed(1)
   train = sample(1:nrow(x), 0.5*nrow(x))
@@ -102,6 +107,8 @@ train_validate_test <- function(x, y)
   errors <- data.frame()
   for (i in 1:nlambda)
    {
+     #result <- data.frame(y = y[train], prediction_on_trg = as.numeric(prediction_on_trg[, i]))
+     #print(result)
      wrong_predictions_on_trg <- xor(y[train], as.numeric(prediction_on_trg[, i]))
      n_wrong_predictions_on_trg <- sum(wrong_predictions_on_trg)
      errors[i, "lambda"] <- lambdas[i]
@@ -165,9 +172,30 @@ analyze_glm_errors <- function()
          theme(axis.title = element_text(colour = 'red', size = 12))
   print(p)
   dev.off()
-
-  
 }
+
+train_validate_test_svm <- function(x, y)
+{
+  library(e1071)
+  set.seed(1)
+  model <- svm(x, y, type = "C-classification")
+  predicted_label <- predict(model, x)
+
+  #wrong_predictions_on_trg <- xor(y, predicted_label)
+  wrong_predictions_on_trg <- as.numeric(y != predicted_label)
+
+  n_wrong_predictions_on_trg <- sum(wrong_predictions_on_trg)
+  trg_error <- n_wrong_predictions_on_trg/length(y)
+  #Training error with linear kernel is 0.19102416570771. FNR = 0.68, FPR = 0.00796
+  cat(paste("n_wrong_predictions_on_trg = ", n_wrong_predictions_on_trg, ", length(y) = ", length(y), ", trg_error = ", trg_error, "\n", sep = ""))
+  print(table(y, predicted_label, dnn = list('actual', 'predicted')))
+  model
+  
+  #tune.out = tune(svm, y~., data = x, kernel = "linear", ranges = list(cost = c(0.001, 0.01, 0.1, 1, 5, 10, 100)))
+}
+
+
+
 
 
 
