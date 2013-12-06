@@ -75,8 +75,8 @@ fit_model <- function()
 
   #trg_model <- train_validate_test_lr(sparse_mat, session_labels$category)
   session_labels$markedcategory <- as.factor(session_labels$markedcategory)
-  trg_model <- train_validate_test_svm(sparse_mat, session_labels$markedcategory)
-  return(trg_model)
+  cv.out <- train_validate_test_svm(sparse_mat, session_labels$markedcategory)
+  return(cv.out)
  }
 
 
@@ -133,6 +133,8 @@ train_validate_test_lr <- function(x, y)
      errors[i, "nonzero_covariates"] <- cv.out$nzero[i]
    }
   print(errors)
+  #Min CV error = 0.1451613. Corresponding lambda = 0.004979912, training error = 0.002304147, test error = 0.09885057, 
+  #FNR = 0.1810345, FPR = 0.06896552, #covariates = 336 out of 26370 (1.2% of covariates).
   write.csv(errors, "./documents/errors_glmnet/without_weights/errors_glmnet.csv")
 }
 
@@ -174,24 +176,40 @@ analyze_glm_errors <- function()
   dev.off()
 }
 
-train_validate_test_svm <- function(x, y)
+svm_training_only <- function(x, y)
 {
   library(e1071)
   set.seed(1)
+
   model <- svm(x, y, type = "C-classification")
   predicted_label <- predict(model, x)
 
-  #wrong_predictions_on_trg <- xor(y, predicted_label)
   wrong_predictions_on_trg <- as.numeric(y != predicted_label)
-
   n_wrong_predictions_on_trg <- sum(wrong_predictions_on_trg)
   trg_error <- n_wrong_predictions_on_trg/length(y)
   #Training error with linear kernel is 0.19102416570771. FNR = 0.68, FPR = 0.00796
   cat(paste("n_wrong_predictions_on_trg = ", n_wrong_predictions_on_trg, ", length(y) = ", length(y), ", trg_error = ", trg_error, "\n", sep = ""))
   print(table(y, predicted_label, dnn = list('actual', 'predicted')))
   model
-  
-  #tune.out = tune(svm, y~., data = x, kernel = "linear", ranges = list(cost = c(0.001, 0.01, 0.1, 1, 5, 10, 100)))
+}
+
+train_validate_test_svm <- function(x, y)
+{
+  library(e1071)
+  set.seed(1)
+
+  train = sample(1:nrow(x), 0.5*nrow(x))
+  test = (-train)
+  y.test = y[test]
+  cat(paste("Size of training data = ", length(train), ", size of test data = ", (nrow(x) - length(train)), "\n", sep = ""))
+
+  tune.out = tune.svm(x[train, ], y[train], kernel = "linear", cost = c(0.001, 0.01, 0.1, 1, 5, 10, 100))
+  bestmod <- tune.out$best.model
+  ypred = predict(bestmod, x[test, ])
+
+  #With best model from CV applied on test data, FNR = 0.1, FPR = 0.056, test error = 0.06896. Best CV error = 0.06676022 for cost = 0.1
+  print(table(y.test, ypred, dnn = list('actual', 'predicted')))
+  tune.out
 }
 
 
