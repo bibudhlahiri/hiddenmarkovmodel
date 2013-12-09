@@ -75,6 +75,9 @@ fit_model <- function()
 
   #trg_model <- train_validate_test_lr(sparse_mat, session_labels$category)
   session_labels$markedcategory <- as.factor(session_labels$markedcategory)
+  
+  #trg_model <- svm_training_only(sparse_mat, session_labels$markedcategory)
+  #return(trg_model)
   cv.out <- train_validate_test_svm(sparse_mat, session_labels$markedcategory)
   return(cv.out)
  }
@@ -181,13 +184,17 @@ svm_training_only <- function(x, y)
   library(e1071)
   set.seed(1)
 
-  model <- svm(x, y, type = "C-classification")
+  #model <- svm(x, y, type = "C-classification", kernel = "linear")
+  #model <- svm(x, y, kernel = "radial", gamma = 1, cost = 1)
+  model <- svm(x, y, kernel = "polynomial", degree = 3)
   predicted_label <- predict(model, x)
 
   wrong_predictions_on_trg <- as.numeric(y != predicted_label)
   n_wrong_predictions_on_trg <- sum(wrong_predictions_on_trg)
   trg_error <- n_wrong_predictions_on_trg/length(y)
-  #Training error with linear kernel is 0.19102416570771. FNR = 0.68, FPR = 0.00796
+  #Training error with linear kernel is 0.0023. FNR = 0, FPR = 0.00316
+  #Training error with RBF kernel is 0, so FNR = 0, FPR = 0. RBF is overfitting.
+  #Training error with polynomial kernel with degree 3 is 0.207, FNR = 0.7457, FPR = 0.0063. 
   cat(paste("n_wrong_predictions_on_trg = ", n_wrong_predictions_on_trg, ", length(y) = ", length(y), ", trg_error = ", trg_error, "\n", sep = ""))
   print(table(y, predicted_label, dnn = list('actual', 'predicted')))
   model
@@ -203,11 +210,16 @@ train_validate_test_svm <- function(x, y)
   y.test = y[test]
   cat(paste("Size of training data = ", length(train), ", size of test data = ", (nrow(x) - length(train)), "\n", sep = ""))
 
-  tune.out = tune.svm(x[train, ], y[train], kernel = "linear", cost = c(0.001, 0.01, 0.1, 1, 5, 10, 100))
+  #tune.out = tune.svm(x[train, ], y[train], kernel = "linear", cost = c(0.001, 0.01, 0.1, 1, 5, 10, 100))
+  #tune.out = tune.svm(x[train, ], y[train], kernel = "radial", cost = c(0.1, 1, 10, 100, 1000), gamma = c(0.5, 1, 2, 3, 4))
+  tune.out = tune.svm(x[train, ], y[train], kernel = "polynomial", cost = c(0.001, 0.01, 0.1, 1, 5, 10, 100), degree = c(2, 3, 4))
   bestmod <- tune.out$best.model
   ypred = predict(bestmod, x[test, ])
 
-  #With best model from CV applied on test data, FNR = 0.1, FPR = 0.056, test error = 0.06896. Best CV error = 0.06676022 for cost = 0.1
+  #With best model from CV applied on test data for linear kernel, FNR = 0.1, FPR = 0.056, test error = 0.06896. Best CV error = 0.06676022 for cost = 0.1
+  #With best model from CV applied on test data for RBF kernel, FNR = 0.706, FPR = 0, test error = 0.1885057. Best CV error = 0.2391649 for gamma = 0.5 and cost = 10
+  #With best model from CV applied on test data for polynomial kernel, FNR = 0.6724, FPR = 0.01567, test error = 0.19. Best CV error = 0.2138478 for degree = 2 and cost = 100
+  
   print(table(y.test, ypred, dnn = list('actual', 'predicted')))
   tune.out
 }
