@@ -78,8 +78,9 @@ fit_model <- function()
   
   #trg_model <- svm_training_only(sparse_mat, session_labels$markedcategory)
   #return(trg_model)
-  cv.out <- train_validate_test_svm(sparse_mat, session_labels$markedcategory)
-  return(cv.out)
+  #bestmod <- train_validate_test_svm(sparse_mat, session_labels$markedcategory)
+  tune.out <- svm_on_balanced_sample(sparse_mat, session_labels$markedcategory)
+  return(tune.out)
  }
 
 
@@ -204,15 +205,15 @@ train_validate_test_svm <- function(x, y)
 {
   library(e1071)
   set.seed(1)
-
+  cat(paste("class(y) = ", class(y), "\n", sep = ""))
   train = sample(1:nrow(x), 0.5*nrow(x))
   test = (-train)
   y.test = y[test]
   cat(paste("Size of training data = ", length(train), ", size of test data = ", (nrow(x) - length(train)), "\n", sep = ""))
 
-  #tune.out = tune.svm(x[train, ], y[train], kernel = "linear", cost = c(0.001, 0.01, 0.1, 1, 5, 10, 100))
+  tune.out = tune.svm(x[train, ], y[train], kernel = "linear", cost = c(0.001, 0.01, 0.1, 1, 5, 10, 100))
   #tune.out = tune.svm(x[train, ], y[train], kernel = "radial", cost = c(0.1, 1, 10, 100, 1000), gamma = c(0.5, 1, 2, 3, 4))
-  tune.out = tune.svm(x[train, ], y[train], kernel = "polynomial", cost = c(0.001, 0.01, 0.1, 1, 5, 10, 100), degree = c(2, 3, 4))
+  #tune.out = tune.svm(x[train, ], y[train], kernel = "polynomial", cost = c(0.001, 0.01, 0.1, 1, 5, 10, 100), degree = c(2, 3, 4))
   bestmod <- tune.out$best.model
   ypred = predict(bestmod, x[test, ])
 
@@ -221,7 +222,54 @@ train_validate_test_svm <- function(x, y)
   #With best model from CV applied on test data for polynomial kernel, FNR = 0.6724, FPR = 0.01567, test error = 0.19. Best CV error = 0.2138478 for degree = 2 and cost = 100
   
   print(table(y.test, ypred, dnn = list('actual', 'predicted')))
+  bestmod
+}
+
+#We take samples from the User class so that the number of bot and user sessions become same, and train SVM on that.
+svm_on_balanced_sample <- function(x, y)
+{
+  library(e1071)
+  set.seed(1)
+
+  train = sample(1:nrow(x), 0.8*nrow(x))
+  test = (-train)
+
+  x.train = x[train, ]
+  y.train = y[train]
+  x.test = x[test, ]
+  y.test = y[test]
+  cat(paste("Size of training data = ", length(train), ", size of test data = ", (nrow(x) - length(train)), "\n", sep = ""))
+
+  #Take the bot and user sessions apart from the training data, do the sampling on the user subset, and append them back.
+  #Note: bot_indices_in_training is wrt the indices in y.train and not wrt the indices in y
+  bot_indices_in_training <- which(y.train == 'Bot')
+  y.train.bot <- y.train[bot_indices_in_training]
+
+  #Note: user_indices_in_training is wrt the indices in y.train and not wrt the indices in y
+  user_indices_in_training <- which(y.train == 'User')
+  sample_user_indices_in_training <- sample(user_indices_in_training, length(bot_indices_in_training))
+  y.train.user <- y.train[sample_user_indices_in_training]
+
+
+  x.train <- x.train[append(sample_user_indices_in_training, bot_indices_in_training), ]
+  y.train <- y.train[append(sample_user_indices_in_training, bot_indices_in_training)]
+  
+  cat(paste("Size of training data = ", nrow(x.train), ", size of test data = ", (nrow(x) - length(train)), "\n", sep = ""))
+
+  tune.out = tune.svm(x.train, y.train, kernel = "linear", cost = c(0.001, 0.01, 0.1, 1, 5, 10, 100))
+  bestmod <- tune.out$best.model
+  ypred = predict(bestmod, x.test)
+
+  #With best model from CV applied on test data for linear kernel, FNR = 0.1, FPR = 0.056, test error = 0.06896. Best CV error = 0.06676022 for cost = 0.1
+  print(table(y.test, ypred, dnn = list('actual', 'predicted')))
   tune.out
+}
+
+#Conditional inference trees
+ctree_training_only <- function()
+{
+  
+  
 }
 
 
