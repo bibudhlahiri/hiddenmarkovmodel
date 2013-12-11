@@ -76,11 +76,11 @@ fit_model <- function()
   #trg_model <- train_validate_test_lr(sparse_mat, session_labels$category)
   session_labels$markedcategory <- as.factor(session_labels$markedcategory)
   
-  #trg_model <- svm_training_only(sparse_mat, session_labels$markedcategory)
-  #return(trg_model)
+  trg_model <- svm_training_only(sparse_mat, session_labels$markedcategory)
+  return(trg_model)
   #bestmod <- train_validate_test_svm(sparse_mat, session_labels$markedcategory)
-  tune.out <- svm_on_balanced_sample(sparse_mat, session_labels$markedcategory)
-  return(tune.out)
+  #tune.out <- svm_on_balanced_sample(sparse_mat, session_labels$markedcategory)
+  #return(tune.out)
  }
 
 
@@ -185,9 +185,9 @@ svm_training_only <- function(x, y)
   library(e1071)
   set.seed(1)
 
-  #model <- svm(x, y, type = "C-classification", kernel = "linear")
+  model <- svm(x, y, type = "C-classification", kernel = "linear")
   #model <- svm(x, y, kernel = "radial", gamma = 1, cost = 1)
-  model <- svm(x, y, kernel = "polynomial", degree = 3)
+  #model <- svm(x, y, kernel = "polynomial", degree = 3)
   predicted_label <- predict(model, x)
 
   wrong_predictions_on_trg <- as.numeric(y != predicted_label)
@@ -265,13 +265,60 @@ svm_on_balanced_sample <- function(x, y)
   tune.out
 }
 
-#Conditional inference trees
-ctree_training_only <- function()
+#Given a vector of frequencies of diff categories, computes the entropy.
+my_entropy <- function(x)
 {
-  
-  
+  p <- x/sum(x)
+  terms <- (-p)*log(p, 2)
+  sum(terms)
 }
 
+df <- data.frame()
+
+populate_data_frame <- function(obs_id, feature_id, frequency, markedcategory)
+{
+  df[obs_id, feature_id] <<- frequency
+  df[obs_id, "markedcategory"] <<- markedcategory
+}
+
+
+#Goal: To compute information gain between the session category and each of the 2-grams
+feature_selection <- function()
+{
+   con <- dbConnect(PostgreSQL(), user="postgres", password = "impetus123",  
+                   host = "localhost", port="5432", dbname = "cleartrail")
+   statement <- paste("select bs.id, tg.gram_sequence, tg.frequency, bs.markedcategory
+                      from two_grams tg, browsing_sessions bs
+                      where bs.ClientIPServerIP = tg.ClientIPServerIP
+                      and bs.BrowsingSessionID = tg.BrowsingSessionID
+                      and bs.markedcategory in ('User', 'Bot')
+                      order by bs.id, tg.gram_sequence limit 1000", sep = "")
+  res <- dbSendQuery(con, statement)
+  data <- fetch(res, n = -1)
+  dbDisconnect(con)
+
+  features <- unique(data$gram_sequence)
+  n_features <- length(features)
+
+  observations <- unique(data$id)
+  n_observations <- length(observations)
+  n_data <- nrow(data)
+  cat(paste("n_data =", n_data, ", n_observations, = ", n_observations, ", n_features = ", n_features, "\n", sep = ""))
+
+  #Create a data frame with sessions as observations and 2-grams as features
+  df <<- data.frame(matrix(nrow = n_observations, 
+                          ncol = n_features + 1))
+  rownames(df) <<- observations
+  colnames(df) <<- append(features, 'markedcategory')
+
+  print(Sys.time())
+  apply(data, 1, function(row)populate_data_frame(row["id"], row["gram_sequence"], row["frequency"], row["markedcategory"]))
+  print(Sys.time())
+
+  weights_ig <- information.gain(markedcategory~., df)
+  #weights_cs <- chi.squared(markedcategory~., df)
+  #return(list("weights_ig" = weights_ig, "weights_cs" = weights_cs)) 
+}
 
 
 
