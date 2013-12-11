@@ -265,13 +265,6 @@ svm_on_balanced_sample <- function(x, y)
   tune.out
 }
 
-#Given a vector of frequencies of diff categories, computes the entropy.
-my_entropy <- function(x)
-{
-  p <- x/sum(x)
-  terms <- (-p)*log(p, 2)
-  sum(terms)
-}
 
 df <- data.frame()
 
@@ -333,23 +326,10 @@ cont_table_for_two_gram <- function(con, gram_sequence)
   res <- dbSendQuery(con, statement)
   gram_present <- fetch(res, n = -1)
   botrow <- subset(gram_present, (markedcategory == 'Bot'))
-  if (nrow(botrow) > 0)
-  {
-    a1 <- botrow[, "count"]
-  }
-  else
-  {
-    a1 <- 0
-  }
+  a1 <- ifelse(nrow(botrow) > 0, botrow[, "count"], 0)
+  
   userrow <- subset(gram_present, (markedcategory == 'User'))
-  if (nrow(userrow) > 0)
-  {
-    a2 <- userrow[, "count"]
-  }
-  else
-  {
-    a2 <- 0
-  }
+  a2 <- ifelse(nrow(userrow) > 0, userrow[, "count"], 0)
 
   statement <- paste("select bs.markedcategory, count(*)
                       from browsing_sessions bs
@@ -364,28 +344,13 @@ cont_table_for_two_gram <- function(con, gram_sequence)
   res <- dbSendQuery(con, statement)
   gram_absent <- fetch(res, n = -1)
   botrow <- subset(gram_absent, (markedcategory == 'Bot'))
-
-  if (nrow(botrow) > 0)
-  {
-    a3 <- botrow[, "count"]
-  }
-  else
-  {
-    a3 <- 0
-  }
+  a3 <- ifelse(nrow(botrow) > 0, botrow[, "count"], 0)
   userrow <- subset(gram_absent, (markedcategory == 'User'))
-  if (nrow(userrow) > 0)
-  {
-    a4 <- userrow[, "count"]
-  }
-  else
-  {
-    a4 <- 0
-  }
+  a4 <- ifelse(nrow(userrow) > 0, userrow[, "count"], 0)
   return(c(a1, a2, a3, a4))
 }
 
-feature_selection_handmade <- function()
+prepare_data_for_feature_selection <- function()
 {
   con <- dbConnect(PostgreSQL(), user="postgres", password = "impetus123",  
                    host = "localhost", port="5432", dbname = "cleartrail")
@@ -393,7 +358,7 @@ feature_selection_handmade <- function()
                       from two_grams tg, browsing_sessions bs
                       where bs.ClientIPServerIP = tg.ClientIPServerIP
                       and bs.BrowsingSessionID = tg.BrowsingSessionID
-                      and bs.markedcategory in ('User', 'Bot') limit 10", sep = "")
+                      and bs.markedcategory in ('User', 'Bot')", sep = "")
   res <- dbSendQuery(con, statement)
   gs <- fetch(res, n = -1)
   n_gs <- nrow(gs)
@@ -405,10 +370,53 @@ feature_selection_handmade <- function()
     gs[i, "a2"] <- v[2]
     gs[i, "a3"] <- v[3]
     gs[i, "a4"] <- v[4]
+    if (i %% 200 == 0)
+    {
+      cat(paste("i = ", i, ", time = ", Sys.time(), "\n", sep = ""))
+    }
   }
   dbDisconnect(con)
   gs
 }
+
+#Given a vector of frequencies of diff categories, computes the entropy.
+my_entropy <- function(x)
+{
+  p <- x/sum(x)
+  len <- length(p)
+  sum <- 0
+  for (i in 1:len)
+  {
+    #cat(paste("i = ", i, ", p[i] = ", p[i], "\n", sep = ""))
+    if (p[i] > 0)
+    {
+      sum <- sum - p[i]*log(p[i], 2)
+    }
+  }
+  #terms <- (-p)*log(p, 2)
+  #sum(terms)
+  sum
+}
+
+info_gain_for_gram_seq <- function(entropy_session_category, a1, a2, a3, a4)
+{
+  spec_cond_entropy_gram_present <- my_entropy(c(a1, a2))
+  spec_cond_entropy_gram_absent <- my_entropy(c(a3, a4))
+  prob_gram_present <- (a1 + a2)/(a1 + a2 + a3 + a4)
+  prob_gram_absent <- (a3 + a4)/(a1 + a2 + a3 + a4)
+  cond_entropy <- prob_gram_present*spec_cond_entropy_gram_present + prob_gram_absent*spec_cond_entropy_gram_absent
+  return(entropy_session_category - cond_entropy)
+}
+
+compute_info_gain <- function()
+{
+  entropy_session_category <- my_entropy(c(236, 633))
+  gs <- read.csv("/Users/blahiri/hiddenmarkovmodel/documents/gram_seq_for_feature_sel.csv")
+  gs$info_gain <- apply(gs, 1, function(row)info_gain_for_gram_seq(entropy_session_category, as.numeric(row["a1"]), as.numeric(row["a2"]), 
+                        as.numeric(row["a3"]), as.numeric(row["a4"])))
+  gs <- gs[order(-gs[,"info_gain"]),]
+  write.csv(gs, "/Users/blahiri/hiddenmarkovmodel/documents/gram_seq_for_feature_sel.csv")
+} 
 
 
 
