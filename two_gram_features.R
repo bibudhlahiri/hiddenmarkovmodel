@@ -320,6 +320,96 @@ feature_selection <- function()
   #return(list("weights_ig" = weights_ig, "weights_cs" = weights_cs)) 
 }
 
+cont_table_for_two_gram <- function(con, gram_sequence)
+{
+  statement <- paste("select bs.markedcategory, count(distinct bs.id)
+                      from two_grams tg, browsing_sessions bs
+                      where bs.ClientIPServerIP = tg.ClientIPServerIP
+                      and bs.BrowsingSessionID = tg.BrowsingSessionID
+                      and bs.markedcategory in ('User', 'Bot')
+                      and tg.gram_sequence = '", gram_sequence, "' ",  
+                      "group by bs.markedcategory
+                      order by bs.markedcategory", sep = "")
+  res <- dbSendQuery(con, statement)
+  gram_present <- fetch(res, n = -1)
+  botrow <- subset(gram_present, (markedcategory == 'Bot'))
+  if (nrow(botrow) > 0)
+  {
+    a1 <- botrow[, "count"]
+  }
+  else
+  {
+    a1 <- 0
+  }
+  userrow <- subset(gram_present, (markedcategory == 'User'))
+  if (nrow(userrow) > 0)
+  {
+    a2 <- userrow[, "count"]
+  }
+  else
+  {
+    a2 <- 0
+  }
+
+  statement <- paste("select bs.markedcategory, count(*)
+                      from browsing_sessions bs
+                      where bs.markedcategory in ('User', 'Bot')
+                      and not exists (select 1 from two_grams tg
+                                      where bs.ClientIPServerIP = tg.ClientIPServerIP
+                                      and bs.BrowsingSessionID = tg.BrowsingSessionID
+                                      and bs.markedcategory in ('User', 'Bot')
+                                      and tg.gram_sequence = '", gram_sequence, "') ", 
+                                      "group by bs.markedcategory 
+                                      order by bs.markedcategory", sep = "")
+  res <- dbSendQuery(con, statement)
+  gram_absent <- fetch(res, n = -1)
+  botrow <- subset(gram_absent, (markedcategory == 'Bot'))
+
+  if (nrow(botrow) > 0)
+  {
+    a3 <- botrow[, "count"]
+  }
+  else
+  {
+    a3 <- 0
+  }
+  userrow <- subset(gram_absent, (markedcategory == 'User'))
+  if (nrow(userrow) > 0)
+  {
+    a4 <- userrow[, "count"]
+  }
+  else
+  {
+    a4 <- 0
+  }
+  return(c(a1, a2, a3, a4))
+}
+
+feature_selection_handmade <- function()
+{
+  con <- dbConnect(PostgreSQL(), user="postgres", password = "impetus123",  
+                   host = "localhost", port="5432", dbname = "cleartrail")
+  statement <- paste("select distinct gram_sequence
+                      from two_grams tg, browsing_sessions bs
+                      where bs.ClientIPServerIP = tg.ClientIPServerIP
+                      and bs.BrowsingSessionID = tg.BrowsingSessionID
+                      and bs.markedcategory in ('User', 'Bot') limit 10", sep = "")
+  res <- dbSendQuery(con, statement)
+  gs <- fetch(res, n = -1)
+  n_gs <- nrow(gs)
+
+  for (i in 1:n_gs)
+  {
+    v <- cont_table_for_two_gram(con, gs[i, "gram_sequence"])
+    gs[i, "a1"] <- v[1]
+    gs[i, "a2"] <- v[2]
+    gs[i, "a3"] <- v[3]
+    gs[i, "a4"] <- v[4]
+  }
+  dbDisconnect(con)
+  gs
+}
+
 
 
 
