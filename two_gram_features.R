@@ -275,15 +275,13 @@ populate_data_frame <- function(obs_id, feature_id, frequency, markedcategory)
 }
 
 #Goal: Prepare data with selected features only
-prepare_data_post_feature_selection <- function()
+prepare_data_post_feature_selection <- function(how_many = 30)
 {
    con <- dbConnect(PostgreSQL(), user="postgres", password = "impetus123",  
                    host = "localhost", port="5432", dbname = "cleartrail")
    gs <- read.csv("/Users/blahiri/hiddenmarkovmodel/documents/gram_seq_for_feature_sel.csv")
-   how_many <- 30
    gs <- gs[1:how_many, ]
    clause <- paste("('", paste(gs$gram_sequence, collapse = "', '"), "')", sep = "")
-   print(clause)
    
    statement <- paste("select bs.id, tg.gram_sequence, tg.frequency, bs.markedcategory
                       from two_grams tg, browsing_sessions bs
@@ -302,7 +300,6 @@ prepare_data_post_feature_selection <- function()
   observations <- unique(data$id)
   n_observations <- length(observations)
   n_data <- nrow(data)
-  cat(paste("n_data =", n_data, ", n_observations = ", n_observations, ", n_features = ", n_features, "\n", sep = ""))
 
   #Create a data frame with sessions as observations and 2-grams as features
   df <<- data.frame(matrix(nrow = n_observations, 
@@ -434,7 +431,46 @@ compute_info_gain <- function()
                         as.numeric(row["a3"]), as.numeric(row["a4"])))
   gs <- gs[order(-gs[,"info_gain"]),]
   write.csv(gs, "/Users/blahiri/hiddenmarkovmodel/documents/gram_seq_for_feature_sel.csv")
+}
+
+rf_with_selected_features <- function(n_features = 30)
+{
+  library(randomForest)
+  set.seed(1)
+  df <- prepare_data_post_feature_selection(n_features)
+  df[,"markedcategory"] <- as.factor(df[,"markedcategory"])
+
+  ubs.rf <- randomForest(df[,!(names(df) %in% c("markedcategory"))], df[,"markedcategory"], 
+               prox = TRUE)
+
+  df$predicted <-  ubs.rf$predicted
+  result <- table(df[,"markedcategory"], df[, "predicted"], dnn = list('actual', 'predicted'))
+  print(result)
+  overall_error <- (result[1,2] + result[2, 1])/sum(result)
+  FNR <- result[1,2]/sum(result[1,])
+  FPR <- result[2,1]/sum(result[2,])
+  cat(paste("overall_error = ", overall_error, ", FNR = ", FNR, ", FPR = ", FPR, "\n", sep = ""))
+}
+
+ctree_with_selected_features <- function(n_features = 30)
+{
+  library(party)
+  df <- prepare_data_post_feature_selection(n_features)
+  df[,"markedcategory"] <- factor(df[,"markedcategory"])
+  
+  #rownames(df) <- 1:nrow(df)
+  print(df[1:5, ])
+  ubs.ct <- ctree(markedcategory ~ ., data = df) 
+
+  df$predicted <-  predict(ubs.ct) 
+  result <- table(df[,"markedcategory"], df[, "predicted"], dnn = list('actual', 'predicted'))
+  print(result)
+  overall_error <- (result[1,2] + result[2, 1])/sum(result)
+  FNR <- result[1,2]/sum(result[1,])
+  FPR <- result[2,1]/sum(result[2,])
+  cat(paste("overall_error = ", overall_error, ", FNR = ", FNR, ", FPR = ", FPR, "\n", sep = ""))
 } 
+ 
 
 
 
