@@ -222,7 +222,7 @@ train_validate_test_svm <- function(x, y)
   #With best model from CV applied on test data for polynomial kernel, FNR = 0.6724, FPR = 0.01567, test error = 0.19. Best CV error = 0.2138478 for degree = 2 and cost = 100
   
   print(table(y.test, ypred, dnn = list('actual', 'predicted')))
-  bestmod
+  tune.out
 }
 
 #We take samples from the User class so that the number of bot and user sessions become same, and train SVM on that.
@@ -475,7 +475,41 @@ ctree_with_selected_features <- function(n_features = 30)
   cat(paste("overall_error = ", overall_error, ", FNR = ", FNR, ", FPR = ", FPR, "\n", sep = ""))
 } 
  
+svm_with_selected_features <- function(n_features = 30)
+{
+  #df <- prepare_data_post_feature_selection(n_features)
+  df <- read.csv("/Users/blahiri/hiddenmarkovmodel/documents/prepared_data_post_feature_selection.csv", header = TRUE)
+  df <- df[-1]
+  tune.out <- train_validate_test_svm(df[,!(names(df) %in% c("markedcategory"))], df[,"markedcategory"])  
+} 
 
 
+gbm_with_selected_features <- function(n_features = 30)
+{
+  library(gbm)
+  library(pracma)
+  set.seed(1)
+  #df <- prepare_data_post_feature_selection(n_features)
+  df <- read.csv("/Users/blahiri/hiddenmarkovmodel/documents/prepared_data_post_feature_selection.csv", header = TRUE)
+  df <- df[-1]
+  df$markedcategory <- as.numeric(df$markedcategory == 'Bot')
+  train = sample(1:nrow(df), nrow(df)/2)
+  cat(paste("training data size = ", length(train), ", test data size = ", nrow(df[-train, ]), "\n", sep = ""))
+  #boost.ubs <- gbm(markedcategory ~ ., data = df[train, ], distribution = "bernoulli", n.trees = 5000, interaction.depth = 1)
 
+  boost.ubs <- gbm.fit(df[train,!(names(df) %in% c("markedcategory"))], df[train,"markedcategory"], distribution = "bernoulli", n.trees = 5000, interaction.depth = 2)
+  yhat.boost = predict(boost.ubs, newdata = df[-train, ], n.trees = 5000)
+  #Responses are on log odds scale, so take the sigmoid function to get the probabilities of positive class back
+  yhat <- sigmoid(yhat.boost)
+  yhat <- as.numeric(yhat >= 0.5)
+
+  result <- table(df[-train,"markedcategory"], yhat, dnn = list('actual', 'predicted'))
+  print(result)
+  overall_error <- (result[1,2] + result[2, 1])/sum(result)
+  FPR <- result[1,2]/sum(result[1,])
+  FNR <- result[2,1]/sum(result[2,])
+  cat(paste("overall_error = ", overall_error, ", FNR = ", FNR, ", FPR = ", FPR, "\n", sep = ""))
+  #yhat.boost
+  boost.ubs
+} 
 
