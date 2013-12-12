@@ -76,11 +76,11 @@ fit_model <- function()
   #trg_model <- train_validate_test_lr(sparse_mat, session_labels$category)
   session_labels$markedcategory <- as.factor(session_labels$markedcategory)
   
-  trg_model <- svm_training_only(sparse_mat, session_labels$markedcategory)
-  return(trg_model)
-  #bestmod <- train_validate_test_svm(sparse_mat, session_labels$markedcategory)
+  #trg_model <- svm_training_only(sparse_mat, session_labels$markedcategory)
+  #return(trg_model)
+  tune.out <- train_validate_test_svm(sparse_mat, session_labels$markedcategory)
   #tune.out <- svm_on_balanced_sample(sparse_mat, session_labels$markedcategory)
-  #return(tune.out)
+  return(tune.out)
  }
 
 
@@ -211,7 +211,7 @@ train_validate_test_svm <- function(x, y)
   y.test = y[test]
   cat(paste("Size of training data = ", length(train), ", size of test data = ", (nrow(x) - length(train)), "\n", sep = ""))
 
-  tune.out = tune.svm(x[train, ], y[train], kernel = "linear", cost = c(0.001, 0.01, 0.1, 1, 5, 10, 100))
+  tune.out = tune.svm(x[train, ], y[train], kernel = "linear", class.weights = c(Bot = 2.68), cost = c(0.001, 0.01, 0.1, 1, 5, 10, 100))
   #tune.out = tune.svm(x[train, ], y[train], kernel = "radial", cost = c(0.1, 1, 10, 100, 1000), gamma = c(0.5, 1, 2, 3, 4))
   #tune.out = tune.svm(x[train, ], y[train], kernel = "polynomial", cost = c(0.001, 0.01, 0.1, 1, 5, 10, 100), degree = c(2, 3, 4))
   bestmod <- tune.out$best.model
