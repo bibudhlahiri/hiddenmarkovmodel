@@ -327,6 +327,8 @@ prepare_data_post_feature_selection <- function(how_many = 30)
   df[(n_observations + 1):(n_observations + n_remaining_sessions), "markedcategory"] <- remaining_sessions$markedcategory
   df[(n_observations + 1):(n_observations + n_remaining_sessions), features] <- 0
 
+  #df[, features] <- as.numeric(df[, features])
+  write.csv(df, "/Users/blahiri/hiddenmarkovmodel/documents/prepared_data_post_feature_selection.csv")
   dbDisconnect(con)
   df
 }
@@ -455,9 +457,11 @@ rf_with_selected_features <- function(n_features = 30)
 ctree_with_selected_features <- function(n_features = 30)
 {
   library(party)
-  df <- prepare_data_post_feature_selection(n_features)
+  #df <- prepare_data_post_feature_selection(n_features)
+  df <- read.csv("/Users/blahiri/hiddenmarkovmodel/documents/prepared_data_post_feature_selection.csv")
   df[,"markedcategory"] <- factor(df[,"markedcategory"])
-  
+  #df$markedcategory <- as.numeric(df$markedcategory == 'Bot')
+  print(class(df[,"markedcategory"])) 
   #rownames(df) <- 1:nrow(df)
   print(df[1:5, ])
   ubs.ct <- ctree(markedcategory ~ ., data = df) 
