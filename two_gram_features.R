@@ -4,6 +4,179 @@ library(reshape2)
 library(RPostgreSQL)
 require(hash)
 library(Matrix)
+library(ggplot2)
+library(plyr)
+library(gridExtra)
+
+
+gram_seq_in_sessions <- function()
+{
+  con <- dbConnect(PostgreSQL(), user="postgres", password = "impetus123",  
+                   host = "localhost", port="5432", dbname = "cleartrail")
+  statement <- "select tg.gram_sequence, count(distinct bs.id)
+                from two_grams tg, browsing_sessions bs
+                where bs.ClientIPServerIP = tg.ClientIPServerIP
+                and bs.BrowsingSessionID = tg.BrowsingSessionID
+                and bs.markedcategory = 'User'
+                group by tg.gram_sequence
+                order by count(distinct bs.id) desc limit 30"
+  res <- dbSendQuery(con, statement)
+  user_frequencies <- fetch(res, n = -1)
+  user_frequencies$gram_sequence <- factor(user_frequencies$gram_sequence, 
+                              levels = user_frequencies$gram_sequence,
+                              ordered = TRUE)
+
+  gp1 <- ggplot(user_frequencies, aes(x = gram_sequence, y = count)) + geom_bar(stat="identity") + 
+         theme(axis.text = element_text(colour = 'blue', size = 14, face = 'bold')) +
+         theme(axis.text.x = element_text(angle = 90)) +
+         theme(axis.title = element_text(colour = 'red', size = 14, face = 'bold')) + 
+         ggtitle("Number of user sessions 2grams appeared in")
+
+  statement <- "select tg.gram_sequence, count(distinct bs.id)
+                from two_grams tg, browsing_sessions bs
+                where bs.ClientIPServerIP = tg.ClientIPServerIP
+                and bs.BrowsingSessionID = tg.BrowsingSessionID
+                and bs.markedcategory = 'Bot'
+                group by tg.gram_sequence
+                order by count(distinct bs.id) desc limit 30"
+  res <- dbSendQuery(con, statement)
+  bot_frequencies <- fetch(res, n = -1)
+  bot_frequencies$gram_sequence <- factor(bot_frequencies$gram_sequence, 
+                              levels = bot_frequencies$gram_sequence,
+                              ordered = TRUE)
+
+  gp2 <- ggplot(bot_frequencies, aes(x = gram_sequence, y = count)) + geom_bar(stat="identity") + 
+         theme(axis.text = element_text(colour = 'blue', size = 14, face = 'bold')) +
+         theme(axis.text.x = element_text(angle = 90)) +
+         theme(axis.title = element_text(colour = 'red', size = 14, face = 'bold')) + 
+         ggtitle("Number of bot sessions 2grams appeared in")
+
+
+  frame_grob <- grid.arrange(gp1, gp2, ncol = 1)
+  grob <- grid.grab()
+
+  image_file <- "./figures/gram_seq_in_sessions.png"
+  png(image_file, width = 900, height = 900)
+  grid.newpage()
+  grid.draw(grob)
+  dev.off()
+
+  dbDisconnect(con)
+}
+
+
+gram_freq_in_sessions <- function()
+{
+  con <- dbConnect(PostgreSQL(), user="postgres", password = "impetus123",  
+                   host = "localhost", port="5432", dbname = "cleartrail")
+  statement <- "select tg.gram_sequence, sum(tg.frequency)
+                from two_grams tg, browsing_sessions bs
+                where bs.ClientIPServerIP = tg.ClientIPServerIP
+                and bs.BrowsingSessionID = tg.BrowsingSessionID
+                and bs.markedcategory = 'User'
+                group by tg.gram_sequence
+                order by sum(tg.frequency) desc limit 30"
+  res <- dbSendQuery(con, statement)
+  user_frequencies <- fetch(res, n = -1)
+  user_frequencies$gram_sequence <- factor(user_frequencies$gram_sequence, 
+                              levels = user_frequencies$gram_sequence,
+                              ordered = TRUE)
+
+  gp1 <- ggplot(user_frequencies, aes(x = gram_sequence, y = sum)) + geom_bar(stat="identity") + 
+         theme(axis.text = element_text(colour = 'blue', size = 14, face = 'bold')) +
+         theme(axis.text.x = element_text(angle = 90)) +
+         theme(axis.title = element_text(colour = 'red', size = 14, face = 'bold')) + 
+         ggtitle("Sum of frequencies of 2grams in user sessions")
+
+  statement <- "select tg.gram_sequence, sum(tg.frequency)
+                from two_grams tg, browsing_sessions bs
+                where bs.ClientIPServerIP = tg.ClientIPServerIP
+                and bs.BrowsingSessionID = tg.BrowsingSessionID
+                and bs.markedcategory = 'Bot'
+                group by tg.gram_sequence
+                order by sum(tg.frequency) desc limit 30"
+  res <- dbSendQuery(con, statement)
+  bot_frequencies <- fetch(res, n = -1)
+  bot_frequencies$gram_sequence <- factor(bot_frequencies$gram_sequence, 
+                              levels = bot_frequencies$gram_sequence,
+                              ordered = TRUE)
+
+  gp2 <- ggplot(bot_frequencies, aes(x = gram_sequence, y = sum)) + geom_bar(stat="identity") + 
+         theme(axis.text = element_text(colour = 'blue', size = 14, face = 'bold')) +
+         theme(axis.text.x = element_text(angle = 90)) +
+         theme(axis.title = element_text(colour = 'red', size = 14, face = 'bold')) + 
+         ggtitle("Sum of frequencies of 2grams in bot sessions")
+
+
+  frame_grob <- grid.arrange(gp1, gp2, ncol = 1)
+  grob <- grid.grab()
+
+  image_file <- "./figures/gram_freq_in_sessions.png"
+  png(image_file, width = 900, height = 900)
+  grid.newpage()
+  grid.draw(grob)
+  dev.off()
+
+  dbDisconnect(con)
+}
+
+
+gram_freq_in_sessions_for_pages <- function()
+{
+  con <- dbConnect(PostgreSQL(), user="postgres", password = "impetus123",  
+                   host = "localhost", port="5432", dbname = "cleartrail")
+  statement <- "select tg.gram_sequence, sum(tg.frequency)
+                from two_grams_with_pages tg, browsing_sessions bs
+                where bs.ClientIPServerIP = tg.ClientIPServerIP
+                and bs.BrowsingSessionID = tg.BrowsingSessionID
+                and bs.markedcategory = 'User'
+                group by tg.gram_sequence
+                order by sum(tg.frequency) desc limit 30"
+  res <- dbSendQuery(con, statement)
+  user_frequencies <- fetch(res, n = -1)
+  user_frequencies$gram_sequence <- factor(user_frequencies$gram_sequence, 
+                              levels = user_frequencies$gram_sequence,
+                              ordered = TRUE)
+
+  gp1 <- ggplot(user_frequencies, aes(x = gram_sequence, y = sum)) + geom_bar(stat="identity") + 
+         theme(axis.text = element_text(colour = 'blue', size = 14, face = 'bold')) +
+         theme(axis.text.x = element_text(angle = 90)) +
+         theme(axis.title = element_text(colour = 'red', size = 14, face = 'bold')) + 
+         ggtitle("Sum of frequencies of 2grams in user sessions")
+
+  statement <- "select tg.gram_sequence, sum(tg.frequency)
+                from two_grams_with_pages tg, browsing_sessions bs
+                where bs.ClientIPServerIP = tg.ClientIPServerIP
+                and bs.BrowsingSessionID = tg.BrowsingSessionID
+                and bs.markedcategory = 'Bot'
+                group by tg.gram_sequence
+                order by sum(tg.frequency) desc limit 30"
+  res <- dbSendQuery(con, statement)
+  bot_frequencies <- fetch(res, n = -1)
+  bot_frequencies$gram_sequence <- factor(bot_frequencies$gram_sequence, 
+                              levels = bot_frequencies$gram_sequence,
+                              ordered = TRUE)
+
+  gp2 <- ggplot(bot_frequencies, aes(x = gram_sequence, y = sum)) + geom_bar(stat="identity") + 
+         theme(axis.text = element_text(colour = 'blue', size = 14, face = 'bold')) +
+         theme(axis.text.x = element_text(angle = 90)) +
+         theme(axis.title = element_text(colour = 'red', size = 14, face = 'bold')) + 
+         ggtitle("Sum of frequencies of 2grams in bot sessions")
+
+
+  frame_grob <- grid.arrange(gp1, gp2, ncol = 1)
+  grob <- grid.grab()
+
+  image_file <- "./figures/gram_freq_in_sessions_for_pages.png"
+  png(image_file, width = 900, height = 900)
+  grid.newpage()
+  grid.draw(grob)
+  dev.off()
+
+  dbDisconnect(con)
+}
+
+
 
 hash_features <- hash()
 reverse_hash_features <- hash()
@@ -63,10 +236,47 @@ prepare_data <- function()
   return(list("sparse_mat" = sparse_mat, "session_labels" = session_labels)) 
 }
 
+prepare_data_page_sequence <- function()
+ {
+  con <- dbConnect(PostgreSQL(), user="postgres", password = "impetus123",  
+                   host = "localhost", port="5432", dbname = "cleartrail")
+  
+  #'NULL' is a special 2-gram for sessions which have not visited more than one page, and hence do not actually have any 2-gram of page URLs.
+  #The frequency of a NULL 2-gram is always 0. 
+  statement <- paste("select bs.id, COALESCE(tg.gram_sequence, 'NULL') as gram_sequence, COALESCE(tg.frequency, 0) as frequency, bs.markedcategory
+                      from browsing_sessions bs left outer join two_grams_with_pages tg 
+                      on (bs.ClientIPServerIP = tg.ClientIPServerIP
+                      and bs.BrowsingSessionID = tg.BrowsingSessionID)
+                      where bs.markedcategory in ('User', 'Bot')
+                      order by bs.id, tg.gram_sequence", sep = "")
+  res <- dbSendQuery(con, statement)
+  data <- fetch(res, n = -1)
+
+  features <- unique(data$gram_sequence)
+  n_features <- length(features)
+  hash_features <<- hash(features, 1:n_features)
+  reverse_hash_features <<- hash(1:n_features, features)
+
+  observations <- unique(data$id)
+  n_observations <- length(observations)
+  hash_observations <<- hash(observations, 1:n_observations)
+
+  data$obs_num <- apply(data, 1, function(row)lookup_obs_num(row["id"]))
+  data$feature_num <- apply(data, 1, function(row)lookup_feature_num(row["gram_sequence"]))
+  sparse_mat <- sparseMatrix(i = data$obs_num, j = data$feature_num, x = data$frequency, dimnames=list(1:n_observations,1:n_features))
+  cat(paste("nrow(sparse_mat) = ", nrow(sparse_mat), ", ncol(sparse_mat) = ", ncol(sparse_mat), "\n", sep = ""))
+
+  session_labels <- unique(data[, c('id', 'markedcategory')]) 
+  cat(paste("nrow(session_labels) = ", nrow(session_labels), "\n", sep = ""))
+
+  dbDisconnect(con) 
+  return(list("sparse_mat" = sparse_mat, "session_labels" = session_labels)) 
+}
+
+
 fit_model <- function()
 {
-  library(glmnet)
-  all_data <- prepare_data()
+  all_data <- prepare_data_page_sequence()
   sparse_mat <- all_data[["sparse_mat"]]
   session_labels <- all_data[["session_labels"]]
  
@@ -80,7 +290,6 @@ fit_model <- function()
   #return(trg_model)
   tune.out <- train_validate_test_svm(sparse_mat, session_labels$markedcategory)
   #tune.out <- svm_on_balanced_sample(sparse_mat, session_labels$markedcategory)
-  return(tune.out)
  }
 
 
@@ -205,7 +414,6 @@ train_validate_test_svm <- function(x, y)
 {
   library(e1071)
   set.seed(1)
-  cat(paste("class(y) = ", class(y), "\n", sep = ""))
   train = sample(1:nrow(x), 0.5*nrow(x))
   test = (-train)
   y.test = y[test]
@@ -215,6 +423,7 @@ train_validate_test_svm <- function(x, y)
   #tune.out = tune.svm(x[train, ], y[train], kernel = "radial", cost = c(0.1, 1, 10, 100, 1000), gamma = c(0.5, 1, 2, 3, 4))
   #tune.out = tune.svm(x[train, ], y[train], kernel = "polynomial", cost = c(0.001, 0.01, 0.1, 1, 5, 10, 100), degree = c(2, 3, 4))
   bestmod <- tune.out$best.model
+  #plot(bestmod, x[train, ])
   ypred = predict(bestmod, x[test, ])
 
   #With best model from CV applied on test data for linear kernel, FNR = 0.1, FPR = 0.056, test error = 0.06896. Best CV error = 0.06676022 for cost = 0.1
@@ -222,7 +431,39 @@ train_validate_test_svm <- function(x, y)
   #With best model from CV applied on test data for polynomial kernel, FNR = 0.6724, FPR = 0.01567, test error = 0.19. Best CV error = 0.2138478 for degree = 2 and cost = 100
   
   print(table(y.test, ypred, dnn = list('actual', 'predicted')))
+  data_for_plots <- false_negative_analysis(x[test, ], y.test, ypred)
   tune.out
+ }
+
+false_negative_analysis <- function(x.test, y.test, ypred)
+{
+  length_test <- length(y.test)
+  false_negative_indexes <- (1:length_test)[y.test == 'Bot' & ypred == 'User']
+  false_negatives <- x.test[false_negative_indexes, ]
+  cat(paste("nrow(false_negatives) = ", nrow(false_negatives), "\n", sep = ""))
+  two_gram_total_frequencies <- colSums(false_negatives, nrow(false_negatives), ncol(false_negatives))
+  columns <- colnames(x.test)
+  two_grams_with_nz_freq <- columns[(1:ncol(x.test))[two_gram_total_frequencies > 0]]
+  nz_frequencies <- two_gram_total_frequencies[two_gram_total_frequencies > 0]
+  data_for_plots <- data.frame(two_grams_with_nz_freq = two_grams_with_nz_freq, nz_frequencies = nz_frequencies)
+  data_for_plots$two_grams_with_nz_freq <- apply(data_for_plots, 1, function(row)lookup_gram_sequence(as.character(row["two_grams_with_nz_freq"])))
+  data_for_plots <- data_for_plots[order(-data_for_plots[,"nz_frequencies"]),]
+
+  data_for_plots$two_grams_with_nz_freq <- factor(data_for_plots$two_grams_with_nz_freq, 
+                                                  levels = data_for_plots$two_grams_with_nz_freq,
+                                                  ordered = TRUE)
+  data_for_plots <- data_for_plots[1:20, ]
+
+  p <- ggplot(data_for_plots, aes(x = two_grams_with_nz_freq, y = nz_frequencies)) + geom_bar(stat="identity") + 
+         theme(axis.text = element_text(colour = 'blue', size = 14, face = 'bold')) +
+         theme(axis.text.x = element_text(angle = 90)) +
+         theme(axis.title = element_text(colour = 'red', size = 14, face = 'bold')) + 
+         ggtitle("Sum of frequencies of false negative 2grams")
+
+  image_file <- "./figures/gram_freq_in_false_negatives.png"
+  png(image_file, width = 900, height = 900)
+  print(p)
+  dev.off()
 }
 
 #We take samples from the User class so that the number of bot and user sessions become same, and train SVM on that.
@@ -284,7 +525,7 @@ prepare_data_post_feature_selection <- function(how_many = 30)
    clause <- paste("('", paste(gs$gram_sequence, collapse = "', '"), "')", sep = "")
    
    statement <- paste("select bs.id, tg.gram_sequence, tg.frequency, bs.markedcategory
-                      from two_grams tg, browsing_sessions bs
+                      from three_grams tg, browsing_sessions bs
                       where bs.ClientIPServerIP = tg.ClientIPServerIP
                       and bs.BrowsingSessionID = tg.BrowsingSessionID
                       and bs.markedcategory in ('User', 'Bot')
