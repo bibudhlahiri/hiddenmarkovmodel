@@ -244,7 +244,7 @@ prepare_data_page_sequence <- function()
   #'NULL' is a special 2-gram for sessions which have not visited more than one page, and hence do not actually have any 2-gram of page URLs.
   #The frequency of a NULL 2-gram is always 0. 
   statement <- paste("select bs.id, COALESCE(tg.gram_sequence, 'NULL') as gram_sequence, COALESCE(tg.frequency, 0) as frequency, bs.markedcategory
-                      from browsing_sessions bs left outer join two_grams_with_pages tg 
+                      from browsing_sessions bs inner join two_grams_with_pages tg 
                       on (bs.ClientIPServerIP = tg.ClientIPServerIP
                       and bs.BrowsingSessionID = tg.BrowsingSessionID)
                       where bs.markedcategory in ('User', 'Bot')
@@ -419,17 +419,26 @@ train_validate_test_svm <- function(x, y)
   y.test = y[test]
   cat(paste("Size of training data = ", length(train), ", size of test data = ", (nrow(x) - length(train)), "\n", sep = ""))
 
-  tune.out = tune.svm(x[train, ], y[train], kernel = "linear", class.weights = c(Bot = 2.68), cost = c(0.001, 0.01, 0.1, 1, 5, 10, 100))
-  #tune.out = tune.svm(x[train, ], y[train], kernel = "radial", cost = c(0.1, 1, 10, 100, 1000), gamma = c(0.5, 1, 2, 3, 4))
+  #tune.out = tune.svm(x[train, ], y[train], kernel = "linear", 
+                      #class.weights = c(Bot = 2.68), 
+  #                    class.weights = c(Bot = 2.455) , cost = c(0.001, 0.01, 0.1, 1, 5, 10, 100))
+  tune.out = tune.svm(x[train, ], y[train], kernel = "radial", 
+                      cost = c(0.1, 1, 10, 100, 1000), gamma = c(0.5, 1, 2, 3, 4)
+                      #cost = 2^(seq(-5, 15, 2)), gamma = 2^(seq(-15, 3, 2))
+                      )
   #tune.out = tune.svm(x[train, ], y[train], kernel = "polynomial", cost = c(0.001, 0.01, 0.1, 1, 5, 10, 100), degree = c(2, 3, 4))
   bestmod <- tune.out$best.model
-  #plot(bestmod, x[train, ])
-  ypred = predict(bestmod, x[test, ])
 
-  #With best model from CV applied on test data for linear kernel, FNR = 0.1, FPR = 0.056, test error = 0.06896. Best CV error = 0.06676022 for cost = 0.1
-  #With best model from CV applied on test data for RBF kernel, FNR = 0.706, FPR = 0, test error = 0.1885057. Best CV error = 0.2391649 for gamma = 0.5 and cost = 10
-  #With best model from CV applied on test data for polynomial kernel, FNR = 0.6724, FPR = 0.01567, test error = 0.19. Best CV error = 0.2138478 for degree = 2 and cost = 100
-  
+  if (FALSE)
+  {
+   code_1_1 <- lookup_feature_num("1_1")
+   code_7656_7656 <- lookup_feature_num("7656_7656")
+   cat(paste("code_1_1 = ", code_1_1, ", code_7656_7656 = ", code_7656_7656, "\n", sep = ""))
+   formula <- as.formula(paste(code_1_1, "~", code_7656_7656, sep = " "))
+   plot(bestmod, x[train, ], formula)
+  }
+
+  ypred = predict(bestmod, x[test, ])
   print(table(y.test, ypred, dnn = list('actual', 'predicted')))
   data_for_plots <- false_negative_analysis(x[test, ], y.test, ypred)
   tune.out
@@ -525,7 +534,7 @@ prepare_data_post_feature_selection <- function(how_many = 30)
    clause <- paste("('", paste(gs$gram_sequence, collapse = "', '"), "')", sep = "")
    
    statement <- paste("select bs.id, tg.gram_sequence, tg.frequency, bs.markedcategory
-                      from three_grams tg, browsing_sessions bs
+                      from two_grams_with_pages tg, browsing_sessions bs
                       where bs.ClientIPServerIP = tg.ClientIPServerIP
                       and bs.BrowsingSessionID = tg.BrowsingSessionID
                       and bs.markedcategory in ('User', 'Bot')
@@ -556,7 +565,7 @@ prepare_data_post_feature_selection <- function(how_many = 30)
   statement <- paste("select distinct bs.id, bs.markedcategory
                       from browsing_sessions bs
                       where bs.markedcategory in ('User', 'Bot')
-                      and not exists (select 1 from two_grams tg where bs.ClientIPServerIP = tg.ClientIPServerIP
+                      and not exists (select 1 from two_grams_with_pages tg where bs.ClientIPServerIP = tg.ClientIPServerIP
                                       and bs.BrowsingSessionID = tg.BrowsingSessionID
                                       and tg.gram_sequence in ", clause, ") ", 
                       "order by bs.id", sep = "")
@@ -577,7 +586,7 @@ prepare_data_post_feature_selection <- function(how_many = 30)
 cont_table_for_two_gram <- function(con, gram_sequence)
 {
   statement <- paste("select bs.markedcategory, count(distinct bs.id)
-                      from two_grams tg, browsing_sessions bs
+                      from two_grams_with_pages tg, browsing_sessions bs
                       where bs.ClientIPServerIP = tg.ClientIPServerIP
                       and bs.BrowsingSessionID = tg.BrowsingSessionID
                       and bs.markedcategory in ('User', 'Bot')
@@ -595,7 +604,7 @@ cont_table_for_two_gram <- function(con, gram_sequence)
   statement <- paste("select bs.markedcategory, count(*)
                       from browsing_sessions bs
                       where bs.markedcategory in ('User', 'Bot')
-                      and not exists (select 1 from two_grams tg
+                      and not exists (select 1 from two_grams_with_pages tg
                                       where bs.ClientIPServerIP = tg.ClientIPServerIP
                                       and bs.BrowsingSessionID = tg.BrowsingSessionID
                                       and bs.markedcategory in ('User', 'Bot')
@@ -616,7 +625,7 @@ prepare_data_for_feature_selection <- function()
   con <- dbConnect(PostgreSQL(), user="postgres", password = "impetus123",  
                    host = "localhost", port="5432", dbname = "cleartrail")
   statement <- paste("select distinct gram_sequence
-                      from two_grams tg, browsing_sessions bs
+                      from two_grams_with_pages tg, browsing_sessions bs
                       where bs.ClientIPServerIP = tg.ClientIPServerIP
                       and bs.BrowsingSessionID = tg.BrowsingSessionID
                       and bs.markedcategory in ('User', 'Bot')", sep = "")
@@ -637,7 +646,7 @@ prepare_data_for_feature_selection <- function()
     }
   }
   dbDisconnect(con)
-  gs
+  write.csv(gs, "/Users/blahiri/hiddenmarkovmodel/documents/gram_seq_for_feature_sel.csv")
 }
 
 #Given a vector of frequencies of diff categories, computes the entropy.
@@ -676,7 +685,7 @@ compute_info_gain <- function()
   write.csv(gs, "/Users/blahiri/hiddenmarkovmodel/documents/gram_seq_for_feature_sel.csv")
 }
 
-rf_with_selected_features <- function(n_features = 30)
+rf_with_selected_features <- function(n_features = 300)
 {
   library(randomForest)
   set.seed(1)
