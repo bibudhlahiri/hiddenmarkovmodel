@@ -288,8 +288,9 @@ fit_model <- function()
   
   #trg_model <- svm_training_only(sparse_mat, session_labels$markedcategory)
   #return(trg_model)
-  tune.out <- train_validate_test_svm(sparse_mat, session_labels$markedcategory)
+  #tune.out <- train_validate_test_svm(sparse_mat, session_labels$markedcategory)
   #tune.out <- svm_on_balanced_sample(sparse_mat, session_labels$markedcategory)
+  model <- adaboost_on_svm(sparse_mat, session_labels$markedcategory, gamma_init = 0.5, gamma_min = 0.0625, gamma_step = 0.0625)
  }
 
 
@@ -418,7 +419,7 @@ train_validate_test_svm <- function(x, y)
   test = (-train)
   y.test = y[test]
   cat(paste("Size of training data = ", length(train), ", size of test data = ", (nrow(x) - length(train)), "\n", sep = ""))
-
+  print(table(y[train]))
   #tune.out = tune.svm(x[train, ], y[train], kernel = "linear", 
                       #class.weights = c(Bot = 2.68), 
   #                    class.weights = c(Bot = 2.455) , cost = c(0.001, 0.01, 0.1, 1, 5, 10, 100))
@@ -429,20 +430,87 @@ train_validate_test_svm <- function(x, y)
   #tune.out = tune.svm(x[train, ], y[train], kernel = "polynomial", cost = c(0.001, 0.01, 0.1, 1, 5, 10, 100), degree = c(2, 3, 4))
   bestmod <- tune.out$best.model
 
-  if (FALSE)
-  {
-   code_1_1 <- lookup_feature_num("1_1")
-   code_7656_7656 <- lookup_feature_num("7656_7656")
-   cat(paste("code_1_1 = ", code_1_1, ", code_7656_7656 = ", code_7656_7656, "\n", sep = ""))
-   formula <- as.formula(paste(code_1_1, "~", code_7656_7656, sep = " "))
-   plot(bestmod, x[train, ], formula)
-  }
+  ypred = predict(bestmod, x[train, ])
+  cat("Confusion matrix for training data\n")
+  print(table(y[train], ypred, dnn = list('actual', 'predicted')))
+  print((y[train])[1:5])
+  print(ypred[1:5])
+  
 
+  cat("Confusion matrix for test data\n")
   ypred = predict(bestmod, x[test, ])
   print(table(y.test, ypred, dnn = list('actual', 'predicted')))
-  data_for_plots <- false_negative_analysis(x[test, ], y.test, ypred)
+  #data_for_plots <- false_negative_analysis(x[test, ], y.test, ypred)
   tune.out
  }
+
+adaboost_on_svm <- function(x, y, gamma_init, gamma_min, gamma_step)
+{
+  library(e1071)
+  set.seed(1)
+  train = sample(1:nrow(x), 0.5*nrow(x))
+  test = (-train)
+  y.test = y[test]
+  cat(paste("Size of training data = ", length(train), ", size of test data = ", (nrow(x) - length(train)), "\n", sep = ""))
+
+  x.train <- x[train, ]
+  y.train <- y[train]
+  
+  
+  N <- nrow(x.train)
+  gamma_current <- gamma_init
+  weights <- rep(1/N, N)
+  t <- 1
+
+  if (FALSE)
+  {
+   model <- svm(x.train, y.train, kernel = "radial", type = "C-classification", gamma = gamma_current, cost = 1)
+   ypred = predict(model, x.train)
+   indicator <- as.numeric(y.train != ypred)
+   print(y.train[1:5])
+   print(ypred[1:5])
+   print(indicator[1:5])
+   error <- sum(indicator)/length(ypred)
+   cat(paste("sum(indicator) = ", sum(indicator), ", error = ", error, "\n", sep = ""))
+  }
+  while (gamma_current > gamma_min)
+  {
+    #if (FALSE)
+    #{
+    for (i in 1:N)
+    {
+      x.train[i, ] <- weights[i]*x.train[i, ]
+    }
+    #}
+    repeat
+    {
+     model <- svm(x.train, y.train, kernel = "radial", type = "C-classification", gamma = gamma_current, cost = 1)
+     #ypred = as.numeric(predict(model, x.train))
+     ypred = predict(model, x.train)
+     indicator <- as.numeric(y.train != ypred)
+     print(y.train[1:5])
+      print(ypred[1:5])
+     print(indicator[1:5])
+     error <- sum(indicator)/length(ypred)
+     epsilon <- weights %*% indicator
+     cat(paste("t = ", t, ", gamma_current = ", gamma_current, ", sum(indicator) = ", sum(indicator), ", error = ", error, ", epsilon = ", epsilon, "\n", sep = ""))
+     if (epsilon <= 0.5)
+       break()
+     else
+       gamma_current <- gamma_current - gamma_step
+    }
+    alpha <- 0.5*log((1 - epsilon)/epsilon)
+    y.train.num <- as.numeric(ifelse(y.train == 'Bot', 1, -1))
+    ypred.num <- as.numeric(ifelse(ypred == 'Bot', 1, -1))
+    weights <- weights*exp(-alpha*y.train.num*ypred.num)
+    sum_weights <- sum(weights)
+    weights <- weights/sum_weights
+    t <- t + 1
+  }
+  
+  return(model)
+}
+
 
 false_negative_analysis <- function(x.test, y.test, ypred)
 {
