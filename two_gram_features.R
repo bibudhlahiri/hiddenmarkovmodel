@@ -456,41 +456,22 @@ adaboost_on_svm <- function(x, y, gamma_init, gamma_min, gamma_step)
   x.train <- x[train, ]
   y.train <- y[train]
   
-  
   N <- nrow(x.train)
   gamma_current <- gamma_init
   weights <- rep(1/N, N)
   t <- 1
 
-  if (FALSE)
-  {
-   model <- svm(x.train, y.train, kernel = "radial", type = "C-classification", gamma = gamma_current, cost = 1)
-   ypred = predict(model, x.train)
-   indicator <- as.numeric(y.train != ypred)
-   print(y.train[1:5])
-   print(ypred[1:5])
-   print(indicator[1:5])
-   error <- sum(indicator)/length(ypred)
-   cat(paste("sum(indicator) = ", sum(indicator), ", error = ", error, "\n", sep = ""))
-  }
   while (gamma_current > gamma_min)
   {
-    #if (FALSE)
-    #{
     for (i in 1:N)
     {
       x.train[i, ] <- weights[i]*x.train[i, ]
     }
-    #}
     repeat
     {
      model <- svm(x.train, y.train, kernel = "radial", type = "C-classification", gamma = gamma_current, cost = 1)
-     #ypred = as.numeric(predict(model, x.train))
      ypred = predict(model, x.train)
      indicator <- as.numeric(y.train != ypred)
-     print(y.train[1:5])
-      print(ypred[1:5])
-     print(indicator[1:5])
      error <- sum(indicator)/length(ypred)
      epsilon <- weights %*% indicator
      cat(paste("t = ", t, ", gamma_current = ", gamma_current, ", sum(indicator) = ", sum(indicator), ", error = ", error, ", epsilon = ", epsilon, "\n", sep = ""))
@@ -500,6 +481,7 @@ adaboost_on_svm <- function(x, y, gamma_init, gamma_min, gamma_step)
        gamma_current <- gamma_current - gamma_step
     }
     alpha <- 0.5*log((1 - epsilon)/epsilon)
+    cat(paste("t = ", t, ", alpha = ", alpha, "\n", sep = ""))
     y.train.num <- as.numeric(ifelse(y.train == 'Bot', 1, -1))
     ypred.num <- as.numeric(ifelse(ypred == 'Bot', 1, -1))
     weights <- weights*exp(-alpha*y.train.num*ypred.num)
@@ -507,7 +489,7 @@ adaboost_on_svm <- function(x, y, gamma_init, gamma_min, gamma_step)
     weights <- weights/sum_weights
     t <- t + 1
   }
-  
+  #Will have to aggregate all the t different models
   return(model)
 }
 
