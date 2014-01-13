@@ -5,6 +5,8 @@ explore_data <- function()
   #1134 rows; 236 bot sessions, 633 user sessions, 265 not known. Median number of URLs visited in a session is 52.5, median number of unique URLs visited in a session is 32.
   ubs <- read.csv("/Users/blahiri/cleartrail_ddos/data/WebServerDDoSDataSet/UserBrowsingsSession_MarkedSessions.csv", header = TRUE)
   bot_sessions <- subset(ubs, MarkedCategory == 'Bot')
+
+  #User sessions have more total URLs than bot sessions, on median 
   summary(bot_sessions$TotalURLs)
   # Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
   #  5.0    20.0    54.0   330.0   263.8  5961.0 
@@ -13,13 +15,23 @@ explore_data <- function()
   #Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
   #5.00   28.00   58.00   80.85   98.00 1673.00
 
-  #User sessions have more unique URLs than bot sessions, on average
+  #User sessions have more unique URLs than bot sessions, on median. However, the difference in unique is more than the difference in total. For bots, the unique is much less than the total,
+  #so bots probably do not visit pages that make many requests. This is at par with what Dharmesh said (the objects' duration is more on user pages than on bot pages)
   summary(bot_sessions$UniqueURLs)
   #Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
   #1.00    4.00   16.50   76.31   44.00 2901.00 
   summary(user_sessions$UniqueURLs)
   #Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
   #3.00   22.00   45.00   57.58   72.00  453.00 
+
+  #The total pages visited by the bot sessions is much more. So, bots visit more pages but less URLs. So they probably hit the pages but do not wait long on a page for the
+  #objects to be downloaded, or they visit pages that do not have many objects on them.
+  print(summary(bot_sessions$TotalPages))
+  #Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+  # 1.00    7.75   26.00  159.80  141.50 3064.00 
+  print(summary(user_sessions$TotalPages))
+  #Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+  #1.00    2.00    4.00    9.73   10.00  188.00 
 }
 
 prepare_data <- function()
