@@ -51,6 +51,7 @@ prepare_data <- function()
 #Classification with simple attributes like number of pages visited in session, duration of session, etc
 classify_rf <- function()
 {
+  set.seed(1)
   sessions <- prepare_data()
   #Random forest does not need splitting data into training and test sets, or cross-validation, as the prediction on a point 
   #is based on trees (about 1/3rd) where it is out-of-bag. The trees differ in two things: each tree takes a bootstrap sample of 
@@ -63,6 +64,23 @@ classify_rf <- function()
   print(table(sessions[,"markedcategory"], sessions[, "predicted"], dnn = list('actual', 'predicted')))
   return(sessions.rf) 
 }
+
+train_validate_test_rf <- function()
+ {
+   set.seed(1)
+   sessions <- prepare_data()
+   train = sample(1:nrow(sessions), 0.5*nrow(sessions))
+   test = (-train)
+   cat(paste("Size of training data = ", length(train), ", size of test data = ", (nrow(sessions) - length(train)), "\n", sep = ""))
+
+   tune.out = tune.randomForest(markedcategory ~ duration_seconds + n_pages_from_session + n_distinct_pages_from_session, 
+                                data = sessions[train, ], ntree = seq(100, 600, 100), mtry = c(1, 2))
+   bestmod <- tune.out$best.model
+   ypred <- predict(bestmod, newdata = sessions[test, ], type = "class")
+   print(table(sessions[test, "markedcategory"], ypred, dnn = list('actual', 'predicted')))
+   tune.out
+ }
+
 
 train_validate_test_svm <- function()
 {
@@ -130,7 +148,7 @@ train_validate_test_rpart <- function()
    tune.out
  }
 
-train_validate_test_nn <- function()
+train_validate_test_nn_single_hidden_layer <- function()
  {
    set.seed(1)
    sessions <- prepare_data()
@@ -141,8 +159,29 @@ train_validate_test_nn <- function()
    y.test = y[test]
    cat(paste("Size of training data = ", length(train), ", size of test data = ", (nrow(sessions) - length(train)), "\n", sep = ""))
 
+   tune.out = tune.nnet(markedcategory ~ duration_seconds + n_pages_from_session + n_distinct_pages_from_session, data = sessions[train, ], size = seq(2, 12, 2)) 
+   
+   bestmod <- tune.out$best.model
+   ypred <- predict(bestmod, newdata = sessions[test, ], type = "class")
+   print(table(y.test, ypred, dnn = list('actual', 'predicted')))
+   tune.out
+ }
+
+#A different implementation of neural network. TODO: Have to check how prediction works.
+train_validate_test_nn <- function()
+ {
+   set.seed(1)
+   sessions <- prepare_data()
+   x <- sessions[, c("duration_seconds", "n_pages_from_session", "n_distinct_pages_from_session")]
+   y <- sessions[,"markedcategory"]
+   y <- ifelse(y == 'Bot', 1, 0)
+   train = sample(1:nrow(x), 0.5*nrow(x))
+   test = (-train)
+   y.test = y[test]
+   cat(paste("Size of training data = ", length(train), ", size of test data = ", (nrow(sessions) - length(train)), "\n", sep = ""))
+
    #bots_ann = nnet(x[train, ], class.ind(y[train]), size = 2)
-   bots_ann <- nnet(markedcategory ~ duration_seconds + n_pages_from_session + n_distinct_pages_from_session, data = sessions[train, ], size = 2) 
+   bots_ann <- neuralnet(markedcategory ~ duration_seconds + n_pages_from_session + n_distinct_pages_from_session, data = sessions[train, ]) 
    ypred <- predict(bots_ann, x[test, ], type = "class")
    
    #bestmod <- tune.out$best.model
@@ -152,6 +191,54 @@ train_validate_test_nn <- function()
    #tune.out
 
  }
+
+prepare_data_for_stacking <- function()
+{
+  set.seed(1)
+  sessions <- prepare_data()
+  k <- 10
+  
+  algos <- c("randomForest", "svm", "rpart", "true")
+  cat(paste("length(algos) = ", length(algos), "\n", sep = ""))
+
+  pred_by_algos <-  data.frame()
+   
+  x <- sessions[, c("duration_seconds", "n_pages_from_session", "n_distinct_pages_from_session")]
+  y <- sessions[,"markedcategory"]
+  x$fold_id <- ceiling(runif(nrow(x), 0.000001, k))
+
+  
+  for (i in 1:k)
+  { 
+    #In iteration i, the ones with fold_id == i form the training set, and the remaining ones form the validation set. 
+    #All the learners are learnt from the training set, and applied on the validation set, and the results from the different 
+    #classification algorithms for each validation point are kept stored.
+    train <- which(x$fold_id != i)
+    validation <- which(x$fold_id == i)
+    cat(paste("i = ", i, ", length(train) = ", length(train), ", length(validation) = ", length(validation), "\n", sep = ""))
+    sessions.rf <- randomForest(x[train, ],  
+                                y[train], mtry = 1, ntree = 500,
+                                prox = TRUE)
+    predicted <-  predict(sessions.rf, newdata = x[validation, ])
+    pred_by_algos[validation, "randomForest"] <- predicted
+
+    tab <- table(y[train])
+    bot_class_weight <- as.numeric(tab["User"]/tab["Bot"])
+    sessions.svm <- svm(x[train, ], y[train], kernel = "radial", 
+                        class.weights = c(Bot = bot_class_weight), 
+                        cost = 100, gamma = 4)
+    predicted <-  predict(sessions.svm, newdata = x[validation, ])
+    pred_by_algos[validation, "svm"] <- predicted
+
+    sessions.rpart <- rpart(markedcategory ~ duration_seconds + n_pages_from_session + n_distinct_pages_from_session, data = sessions[train, ],  
+                            minsplit = 10)
+    predicted <-  predict(sessions.rpart, newdata = x[validation, ], type = "class")
+    pred_by_algos[validation, "rpart"] <- predicted
+  }
+  pred_by_algos$true <- sessions[,"markedcategory"]
+  print(pred_by_algos[1:5, ])
+  pred_by_algos
+} 
 
 
 
