@@ -1,5 +1,7 @@
 library(randomForest)
 library(RPostgreSQL)
+library(e1071)
+library(nnet)
 
 prepare_data <- function()
 {
@@ -61,3 +63,95 @@ classify_rf <- function()
   print(table(sessions[,"markedcategory"], sessions[, "predicted"], dnn = list('actual', 'predicted')))
   return(sessions.rf) 
 }
+
+train_validate_test_svm <- function()
+{
+  set.seed(1)
+  sessions <- prepare_data()
+  x <- sessions[, c("duration_seconds", "n_pages_from_session", "n_distinct_pages_from_session")]
+  y <- sessions[,"markedcategory"]
+  train = sample(1:nrow(x), 0.5*nrow(x))
+  test = (-train)
+  y.test = y[test]
+  cat(paste("Size of training data = ", length(train), ", size of test data = ", (nrow(x) - length(train)), "\n", sep = ""))
+  tab <- table(y[train])
+  bot_class_weight <- as.numeric(tab["User"]/tab["Bot"])
+  cat(paste("bot_class_weight = ", bot_class_weight, "\n", sep = ""))
+ 
+  #tune.out = tune.svm(x[train, ], y[train], kernel = "linear", 
+  #                    class.weights = c(Bot = bot_class_weight) , cost = c(0.001, 0.01, 0.1, 1, 5, 10, 100))
+  tune.out = tune.svm(x[train, ], y[train], kernel = "radial", 
+                      class.weights = c(Bot = bot_class_weight), 
+                      cost = c(0.001, 0.01, 0.1, 1, 10, 100, 1000), gamma = c(0.125, 0.25, 0.5, 1, 2, 3, 4, 5)
+                      )
+  #tune.out = tune.svm(x[train, ], y[train], kernel = "polynomial", cost = c(0.001, 0.01, 0.1, 1, 5, 10, 100), degree = c(2, 3, 4))
+  bestmod <- tune.out$best.model
+
+  ypred = predict(bestmod, x[train, ])
+  cat("Confusion matrix for training data\n")
+  print(table(y[train], ypred, dnn = list('actual', 'predicted')))
+
+  cat("Confusion matrix for test data\n")
+  ypred = predict(bestmod, x[test, ])
+  print(table(y.test, ypred, dnn = list('actual', 'predicted')))
+  tune.out
+ }
+
+ train_validate_test_knn <- function()
+ {
+   set.seed(1)
+   sessions <- prepare_data()
+   x <- sessions[, c("duration_seconds", "n_pages_from_session", "n_distinct_pages_from_session")]
+   y <- sessions[,"markedcategory"]
+   train = sample(1:nrow(x), 0.5*nrow(x))
+   test = (-train)
+   y.test = y[test]
+   cat(paste("Size of training data = ", length(train), ", size of test data = ", (nrow(x) - length(train)), "\n", sep = ""))
+
+   tune.out = tune.knn(x[train, ], y[train], k = 1:10)
+   best_k <- tune.out$best.model$k
+   ypred <- knn(x[train, ], x[test, ], y[train], k = best_k)
+   print(table(y.test, ypred, dnn = list('actual', 'predicted')))
+   tune.out
+ }
+
+train_validate_test_rpart <- function()
+ {
+   set.seed(1)
+   sessions <- prepare_data()
+   train = sample(1:nrow(sessions), 0.5*nrow(sessions))
+   test = (-train)
+   cat(paste("Size of training data = ", length(train), ", size of test data = ", (nrow(sessions) - length(train)), "\n", sep = ""))
+
+   tune.out = tune.rpart(markedcategory ~ duration_seconds + n_pages_from_session + n_distinct_pages_from_session, data = sessions[train, ], minsplit = c(5, 10, 15), maxdepth = c(1, 3, 5, 7))
+   bestmod <- tune.out$best.model
+   ypred <- predict(bestmod, newdata = sessions[test, ], type = "class")
+   print(table(sessions[test, "markedcategory"], ypred, dnn = list('actual', 'predicted')))
+   tune.out
+ }
+
+train_validate_test_nn <- function()
+ {
+   set.seed(1)
+   sessions <- prepare_data()
+   x <- sessions[, c("duration_seconds", "n_pages_from_session", "n_distinct_pages_from_session")]
+   y <- sessions[,"markedcategory"]
+   train = sample(1:nrow(x), 0.5*nrow(x))
+   test = (-train)
+   y.test = y[test]
+   cat(paste("Size of training data = ", length(train), ", size of test data = ", (nrow(sessions) - length(train)), "\n", sep = ""))
+
+   #bots_ann = nnet(x[train, ], class.ind(y[train]), size = 2)
+   bots_ann <- nnet(markedcategory ~ duration_seconds + n_pages_from_session + n_distinct_pages_from_session, data = sessions[train, ], size = 2) 
+   ypred <- predict(bots_ann, x[test, ], type = "class")
+   
+   #bestmod <- tune.out$best.model
+   #ypred <- predict(bestmod, newdata = sessions[test, ], type = "class")
+   print(ypred)
+   print(table(y.test, ypred, dnn = list('actual', 'predicted')))
+   #tune.out
+
+ }
+
+
+
