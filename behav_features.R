@@ -2,6 +2,7 @@ library(randomForest)
 library(RPostgreSQL)
 library(e1071)
 library(nnet)
+library(rpart)
 
 prepare_data <- function()
 {
@@ -12,7 +13,8 @@ prepare_data <- function()
                 where bs.ClientIPServerIP = hr.ClientIPServerIP
                 and bs.browsingsessionid = hr.browsingsessionid
                 and bs.MarkedCategory in ('User', 'Bot')
-                group by bs.ClientIPServerIP, bs.browsingsessionid, bs.MarkedCategory"
+                group by bs.ClientIPServerIP, bs.browsingsessionid, bs.MarkedCategory
+                order by bs.ClientIPServerIP, bs.browsingsessionid"
   res <- dbSendQuery(con, statement)
   sess_durations <- fetch(res, n = -1) 
 
@@ -192,14 +194,22 @@ train_validate_test_nn <- function()
 
  }
 
+naive_bayes <- function()
+{
+  sessions <- prepare_data()
+  x <- sessions[, c("duration_seconds", "n_pages_from_session", "n_distinct_pages_from_session")]
+  y <- sessions[,"markedcategory"]
+
+  classifier <- naiveBayes(x, y) 
+  ypred <- predict(classifier, x, type = "class")
+  print(table(y, ypred, dnn = list('actual', 'predicted')))
+}
+
 prepare_data_for_stacking <- function()
 {
   set.seed(1)
   sessions <- prepare_data()
   k <- 10
-  
-  algos <- c("randomForest", "svm", "rpart", "true")
-  cat(paste("length(algos) = ", length(algos), "\n", sep = ""))
 
   pred_by_algos <-  data.frame()
    
@@ -220,7 +230,7 @@ prepare_data_for_stacking <- function()
                                 y[train], mtry = 1, ntree = 500,
                                 prox = TRUE)
     predicted <-  predict(sessions.rf, newdata = x[validation, ])
-    pred_by_algos[validation, "randomForest"] <- predicted
+    pred_by_algos[validation, "randomForest_class"] <- predicted
 
     tab <- table(y[train])
     bot_class_weight <- as.numeric(tab["User"]/tab["Bot"])
@@ -228,17 +238,87 @@ prepare_data_for_stacking <- function()
                         class.weights = c(Bot = bot_class_weight), 
                         cost = 100, gamma = 4)
     predicted <-  predict(sessions.svm, newdata = x[validation, ])
-    pred_by_algos[validation, "svm"] <- predicted
+    pred_by_algos[validation, "svm_class"] <- predicted
 
     sessions.rpart <- rpart(markedcategory ~ duration_seconds + n_pages_from_session + n_distinct_pages_from_session, data = sessions[train, ],  
                             minsplit = 10)
     predicted <-  predict(sessions.rpart, newdata = x[validation, ], type = "class")
-    pred_by_algos[validation, "rpart"] <- predicted
+    pred_by_algos[validation, "rpart_class"] <- predicted
   }
-  pred_by_algos$true <- sessions[,"markedcategory"]
-  print(pred_by_algos[1:5, ])
+  pred_by_algos$true_class <- sessions[,"markedcategory"]
+  #print(pred_by_algos[1:5, ])
+  write.csv(pred_by_algos, "/Users/blahiri/hiddenmarkovmodel/documents/pred_by_algos.csv")
   pred_by_algos
-} 
+}
+
+apply_stacking_by_rpart <- function()
+{
+  pred_by_algos <- read.csv("/Users/blahiri/hiddenmarkovmodel/documents/pred_by_algos.csv")
+  set.seed(1)
+  x <- pred_by_algos[, c("randomForest_class", "svm_class", "rpart_class")]
+  y <- pred_by_algos[,"true_class"]
+
+  for (column in colnames(x))
+  {
+    x[, column] <- as.factor(x[, column])
+  }
+  y <- as.factor(y)
+  
+  train = sample(1:nrow(x), 0.5*nrow(x))
+  test = (-train)
+  y.test = y[test]
+  cat(paste("Size of training data = ", length(train), ", size of test data = ", (nrow(x) - length(train)), "\n", sep = ""))
+  tab <- table(y[train])
+  bot_class_weight <- as.numeric(tab["User"]/tab["Bot"])
+  cat(paste("bot_class_weight = ", bot_class_weight, "\n", sep = ""))
+ 
+  tune.out = tune.rpart(true_class ~ randomForest_class + svm_class + rpart_class, 
+                        data = pred_by_algos[train, ], minsplit = c(5, 10, 15), maxdepth = c(1, 3, 5, 7))
+  bestmod <- tune.out$best.model
+
+  ypred = predict(bestmod, x[train, ], type = "class")
+  cat("Confusion matrix for training data\n")
+  print(table(y[train], ypred, dnn = list('actual', 'predicted')))
+
+  cat("Confusion matrix for test data\n")
+  ypred = predict(bestmod, x[test, ], type = "class")
+  print(table(y.test, ypred, dnn = list('actual', 'predicted')))
+  tune.out
+}
+
+analyze_data_stacking <- function()
+{
+  #How many of the sessions have got 2 or more algorithms wrong?
+  pred_by_algos <- read.csv("/Users/blahiri/hiddenmarkovmodel/documents/pred_by_algos.csv")
+  n_sessions <- nrow(pred_by_algos)
+  algos <- c("randomForest_class", "svm_class", "rpart_class")
+  n_algos <- length(algos)
+  hard_sessions <- c()
+
+  for (i in 1:n_sessions)
+  {
+    n_failing_algos <- 0
+    for (j in 1:n_algos)
+    {
+      if (pred_by_algos[i, algos[j]] != pred_by_algos[i, "true_class"])
+      {
+        n_failing_algos <- n_failing_algos + 1
+      }
+    }
+    if (n_failing_algos >= 2)
+    {
+        cat(paste("i = ", i, ", n_failing_algos = ", n_failing_algos, "\n", sep = ""))
+        hard_sessions <- append(hard_sessions, i)
+    }
+  }
+  sessions <- prepare_data()
+  #The hard sessions show behavior which are not typical for their classes. User sessions are long, bot sessions are short, or
+  #bot sessions have few pages, or user sessions have large number of pages.
+  print(sessions[hard_sessions, ])
+  hard_sessions
+}
+
+
 
 
 
