@@ -3,6 +3,8 @@ library(RPostgreSQL)
 library(e1071)
 library(nnet)
 library(rpart)
+library(ggplot2)
+library(plyr)
 
 prepare_data_user_behavior <- function()
 {
@@ -305,7 +307,8 @@ prepare_data_for_stacking <- function()
 
   pred_by_algos <-  data.frame()
    
-  x <- sessions[, c("duration_seconds", "n_pages_from_session", "n_distinct_pages_from_session")]
+  #x <- sessions[, c("duration_seconds", "n_pages_from_session", "n_distinct_pages_from_session")]
+  x <- sessions[,!(names(sessions) %in% c("id", "markedcategory"))]
   y <- sessions[,"markedcategory"]
   x$fold_id <- ceiling(runif(nrow(x), 0.000001, k))
 
@@ -318,36 +321,53 @@ prepare_data_for_stacking <- function()
     train <- which(x$fold_id != i)
     validation <- which(x$fold_id == i)
     cat(paste("i = ", i, ", length(train) = ", length(train), ", length(validation) = ", length(validation), "\n", sep = ""))
-    sessions.rf <- randomForest(x[train, ],  
-                                y[train], mtry = 1, ntree = 500,
-                                prox = TRUE)
-    predicted <-  predict(sessions.rf, newdata = x[validation, ])
-    pred_by_algos[validation, "randomForest_class"] <- predicted
+
+    if (FALSE)
+    {
+     sessions.rf <- randomForest(x[train, ], y[train], mtry = 1, ntree = 500, prox = TRUE)
+     predicted <-  predict(sessions.rf, newdata = x[validation, ])
+     pred_by_algos[validation, "randomForest_class"] <- predicted
+    }
 
     tab <- table(y[train])
     bot_class_weight <- as.numeric(tab["User"]/tab["Bot"])
     sessions.svm <- svm(x[train, ], y[train], kernel = "radial", 
                         class.weights = c(Bot = bot_class_weight), 
-                        cost = 100, gamma = 4)
+                        cost = 1000, gamma = 2)
     predicted <-  predict(sessions.svm, newdata = x[validation, ])
     pred_by_algos[validation, "svm_class"] <- predicted
 
     sessions.rpart <- rpart(markedcategory ~ duration_seconds + n_pages_from_session + n_distinct_pages_from_session, data = sessions[train, ],  
-                            minsplit = 10)
+                            minsplit = 10, maxdepth = 5)
     predicted <-  predict(sessions.rpart, newdata = x[validation, ], type = "class")
     pred_by_algos[validation, "rpart_class"] <- predicted
+
+    str_formula <- "markedcategory ~ "
+    for (column in colnames(sessions))
+    {
+     if (column != 'id' & column != 'markedcategory')
+     {
+       str_formula <- paste(str_formula, column, " + ", sep = "")
+     }
+    }
+    str_formula <- substring(str_formula, 1, nchar(str_formula) - 2)
+    sessions.nnet <- nnet(as.formula(str_formula), data = sessions[train, ], size = 10)
+   
+    predicted <- predict(sessions.nnet, newdata = sessions[validation, ], type = "class")
+    pred_by_algos[validation, "nnet_class"] <- predicted
   }
   pred_by_algos$true_class <- sessions[,"markedcategory"]
   #print(pred_by_algos[1:5, ])
-  write.csv(pred_by_algos, "/Users/blahiri/hiddenmarkovmodel/documents/pred_by_algos.csv")
+  write.csv(pred_by_algos, "/Users/blahiri/hiddenmarkovmodel/documents/pred_by_algos_behav_and_ngram_features.csv")
   pred_by_algos
 }
 
 apply_stacking_by_rpart <- function()
 {
-  pred_by_algos <- read.csv("/Users/blahiri/hiddenmarkovmodel/documents/pred_by_algos.csv")
+  pred_by_algos <- read.csv("/Users/blahiri/hiddenmarkovmodel/documents/pred_by_algos_behav_and_ngram_features.csv")
   set.seed(1)
-  x <- pred_by_algos[, c("randomForest_class", "svm_class", "rpart_class")]
+  #x <- pred_by_algos[, c("randomForest_class", "svm_class", "rpart_class", "nnet_class")]
+  x <- pred_by_algos[, c("svm_class", "rpart_class", "nnet_class")]
   y <- pred_by_algos[,"true_class"]
 
   for (column in colnames(x))
@@ -364,7 +384,9 @@ apply_stacking_by_rpart <- function()
   bot_class_weight <- as.numeric(tab["User"]/tab["Bot"])
   cat(paste("bot_class_weight = ", bot_class_weight, "\n", sep = ""))
  
-  tune.out = tune.rpart(true_class ~ randomForest_class + svm_class + rpart_class, 
+  tune.out = tune.rpart(true_class ~ 
+                                      #randomForest_class + 
+                        svm_class + rpart_class, 
                         data = pred_by_algos[train, ], minsplit = c(5, 10, 15), maxdepth = c(1, 3, 5, 7))
   bestmod <- tune.out$best.model
 
@@ -375,7 +397,10 @@ apply_stacking_by_rpart <- function()
   cat("Confusion matrix for test data\n")
   ypred = predict(bestmod, x[test, ], type = "class")
   print(table(y.test, ypred, dnn = list('actual', 'predicted')))
-  tune.out
+  #false_negatives <- y.test[y.test == 'Bot' & ypred == 'User']
+  pred_by_algos[test, "predicted"] <- ypred
+  #tune.out
+  false_negatives <- subset(pred_by_algos, (true_class == 'Bot' & predicted == 'User'))
 }
 
 analyze_data_stacking <- function()
@@ -408,6 +433,34 @@ analyze_data_stacking <- function()
   #bot sessions have few pages, or user sessions have large number of pages.
   print(sessions[hard_sessions, ])
   hard_sessions
+}
+
+pca <- function()
+{
+  sessions <- prepare_data() 
+  sessions_for_pca <- sessions[,!(names(sessions) %in% c("id", "markedcategory"))]
+  pc <- prcomp(sessions_for_pca, scale = TRUE)
+  
+  png("./figures/sessions_biplot.png",  width = 1200, height = 960, units = "px")
+  biplot(pc, col = c("blue", "red"))
+  dev.off()
+  
+  #Print the coefficients in the first principal component in decreasing order. n_pages_from_session, n_distinct_pages_from_session and duration_seconds rank pretty low, actually.
+  #print(sort(pc$rotation[, "PC1"], decreasing = TRUE))
+  proj_along_first_two_pcs <- cbind(data.frame(pc$x[, c("PC1", "PC2")]), markedcategory = sessions$markedcategory)
+  print(table(proj_along_first_two_pcs$markedcategory))  
+  png("./figures/sessions_first_two_pc.png",  width = 1200, height = 960, units = "px")
+  p <- ggplot(proj_along_first_two_pcs, aes(x = PC1, y = PC2)) + aes(shape = markedcategory) + geom_point(aes(colour = markedcategory), size = 2) + 
+         theme(axis.text = element_text(colour = 'blue', size = 14, face = 'bold')) +
+         theme(axis.title = element_text(colour = 'red', size = 14, face = 'bold')) + 
+         ggtitle("Projections along first two PCs for user and bot sessions")
+  print(p)
+  dev.off()
+  
+  #These are all bots: on 2-PC plot, all user sessions are concentrated in a very small region, but some bot sessions are scattered all over
+  anomalous <- subset(proj_along_first_two_pcs, (PC1 >= 0 & PC2 >= 0.25))
+  anom_sessions <- sessions[rownames(anom), ]
+  #Are these the ones that are being hard to classify?
 }
 
 
