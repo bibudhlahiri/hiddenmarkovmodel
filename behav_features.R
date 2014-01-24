@@ -5,6 +5,7 @@ library(nnet)
 library(rpart)
 library(ggplot2)
 library(plyr)
+library(pmml)
 
 prepare_data_user_behavior <- function()
 {
@@ -153,6 +154,43 @@ train_validate_test_rf <- function()
    tune.out
  }
 
+#x_i ia a support vector, n is a test data point.
+compute_linear_kernel <- function(x_i, n)
+{
+  inner_prod <- x_i %*% n
+  return(inner_prod)
+}
+
+
+#x_i ia a support vector, n is a test data point.
+compute_rbf_kernel <- function(gamma, x_i, n)
+{
+  inner_prod <- exp(-gamma*sum((x_i - n)^2))
+  return(inner_prod)
+}
+
+predict_test_point_svm_rbf <- function(tot.nSV, coefs, gamma, SV, rho, n)
+{
+  sum <- 0
+  for (i in 1:tot.nSV)
+  {
+    kern_val <- compute_rbf_kernel(gamma, SV[i, ], n)
+    sum <- sum + coefs[i]*kern_val
+  }
+  return(sign(sum - rho))
+}
+
+predict_test_point_svm_linear <- function(tot.nSV, coefs, SV, rho, n)
+{
+  sum <- 0
+  for (i in 1:tot.nSV)
+  {
+    kern_val <- compute_linear_kernel(SV[i, ], n)
+    sum <- sum + coefs[i]*kern_val
+  }
+  return(sign(sum - rho))
+}
+
 
 train_validate_test_svm <- function()
 {
@@ -162,6 +200,7 @@ train_validate_test_svm <- function()
   x <- sessions[,!(names(sessions) %in% c("id", "markedcategory"))]
   y <- sessions[,"markedcategory"]
   train = sample(1:nrow(x), 0.5*nrow(x))
+
   test = (-train)
   y.test = y[test]
   cat(paste("Size of training data = ", length(train), ", size of test data = ", (nrow(x) - length(train)), "\n", sep = ""))
@@ -169,12 +208,12 @@ train_validate_test_svm <- function()
   bot_class_weight <- as.numeric(tab["User"]/tab["Bot"])
   cat(paste("bot_class_weight = ", bot_class_weight, "\n", sep = ""))
  
-  tune.out = tune.svm(x[train, ], y[train], kernel = "linear", 
-                      class.weights = c(Bot = bot_class_weight) , cost = c(0.001, 0.01, 0.1, 1, 5, 10, 100))
-  #tune.out = tune.svm(x[train, ], y[train], kernel = "radial", 
-  #                    class.weights = c(Bot = bot_class_weight), 
-  #                    cost = c(0.001, 0.01, 0.1, 1, 10, 100, 1000), gamma = c(0.125, 0.25, 0.5, 1, 2, 3, 4, 5)
-  #                    )
+  #tune.out = tune.svm(x[train, ], y[train], kernel = "linear", 
+  #                    class.weights = c(Bot = bot_class_weight) , cost = c(0.001, 0.01, 0.1, 1, 5, 10, 100))
+  tune.out = tune.svm(x[train, ], y[train], kernel = "radial", 
+                      class.weights = c(Bot = bot_class_weight), 
+                      cost = c(0.001, 0.01, 0.1, 1, 10, 100, 1000), gamma = c(0.125, 0.25, 0.5, 1, 2, 3, 4, 5)
+                      )
   bestmod <- tune.out$best.model
 
   ypred = predict(bestmod, x[train, ])
@@ -182,10 +221,31 @@ train_validate_test_svm <- function()
   print(table(y[train], ypred, dnn = list('actual', 'predicted')))
 
   cat("Confusion matrix for test data\n")
-  ypred = predict(bestmod, x[test, ])
+  #ypred = predict(bestmod, x[test, ])
+
+  #Custom method for predicting labels on test data
+  coefs <- bestmod$coefs
+  rho <- bestmod$rho
+  gamma <- bestmod$gamma
+  tot.nSV <- bestmod$tot.nSV
+  SV <- bestmod$SV
+
+  x.test <- x[test, ]
+ 
+  #Got this by e1071:::predict.svm at R command prompt
+  if (any(bestmod$scaled)) 
+  {
+     x.test[, bestmod$scaled] <- scale(x.test[, bestmod$scaled, drop = FALSE], center = bestmod$x.scale$"scaled:center", 
+                                       scale = bestmod$x.scale$"scaled:scale")
+  }
+  ypred <- apply(x.test, 1, function(row)predict_test_point_svm_rbf(tot.nSV, coefs, gamma, SV, rho, row)) 
+  ypred <- ifelse(ypred == 1, 'Bot', 'User')
+  
   print(table(y.test, ypred, dnn = list('actual', 'predicted')))
   tune.out
  }
+
+ 
 
  train_validate_test_knn <- function()
  {
