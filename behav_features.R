@@ -239,7 +239,7 @@ train_validate_test_svm <- function()
                                        scale = bestmod$x.scale$"scaled:scale")
   }
   ypred <- apply(x.test, 1, function(row)predict_test_point_svm_rbf(tot.nSV, coefs, gamma, SV, rho, row)) 
-  ypred <- ifelse(ypred == 1, 'Bot', 'User')
+  ypred <- ifelse(ypred == -1, 'Bot', 'User')
   
   print(table(y.test, ypred, dnn = list('actual', 'predicted')))
   tune.out
@@ -266,6 +266,69 @@ train_validate_test_svm <- function()
    tune.out
  }
 
+#n is the test data point
+predict_test_point_rpart <- function(model, test_point)
+{
+  frame <- model$frame
+  splits <- model$splits
+  current_node_number <- 1
+  rownames_split_matrix <- rownames(splits)
+  n_splits <- nrow(splits)
+
+  while (TRUE)
+  {
+    current_node <- frame[as.character(current_node_number), ]
+    current_node_split_var <- as.character(current_node[1, "var"])
+    if (as.character(current_node_split_var) == '<leaf>')
+    {
+      predicted <- current_node[1, "yval"]
+      break
+    }
+    current_node_size <- current_node[1, "n"]
+    current_node_split_point <- 0
+    current_node_direction <- 0
+    
+    #Find the split point by scrolling the splits matrix, look for row that matches
+    #on current_node_split_var and current_node_size
+    
+    for (j in 1:n_splits)
+    {
+      if ((rownames_split_matrix[j] ==  current_node_split_var) & 
+          (splits[j, "count"] == current_node_size))
+      {
+        current_node_split_point <- splits[j, "index"]
+        current_node_direction <- splits[j, "ncat"]
+        break
+      }
+    }
+    if (current_node_direction == 1)
+    {
+      # x >= cutpoint is sent to the left, otherwise to the right
+      if (test_point[1, current_node_split_var] >= current_node_split_point)
+      {
+        current_node_number <- 2*current_node_number
+      }
+      else
+      {
+        current_node_number <- 2*current_node_number + 1
+      }
+    }
+    else
+    {
+      # x < cutpoint is sent to the left, otherwise to the right
+      if (test_point[1, current_node_split_var] < current_node_split_point)
+      {
+        current_node_number <- 2*current_node_number
+      }
+      else
+      {
+        current_node_number <- 2*current_node_number + 1
+      }
+    }
+  } #end while
+  predicted <- ifelse(predicted == 1, 'Bot', 'User')
+}
+
 train_validate_test_rpart <- function()
  {
    set.seed(1)
@@ -288,8 +351,12 @@ train_validate_test_rpart <- function()
    
    tune.out = tune.rpart(as.formula(str_formula), data = sessions[train, ], minsplit = c(5, 10, 15), maxdepth = c(1, 3, 5, 7))
    bestmod <- tune.out$best.model
-   ypred <- predict(bestmod, newdata = sessions[test, ], type = "class")
+   
+   #ypred <- predict(bestmod, newdata = sessions[test, ], type = "class")
+    
+   ypred <- apply(sessions[test, !(names(sessions) %in% c("id", "markedcategory"))], 1, function(row)predict_test_point_rpart(bestmod, data.frame(t(row)))) 
    print(table(sessions[test, "markedcategory"], ypred, dnn = list('actual', 'predicted')))
+
    tune.out
  }
 
