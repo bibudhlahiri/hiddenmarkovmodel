@@ -360,6 +360,61 @@ train_validate_test_rpart <- function()
    tune.out
  }
 
+sigmoid <- function(x)
+{
+  return(1/(1 + exp(-x)))
+}
+
+prepare_connection_weights <- function(model)
+{
+  wts <- model$wts
+  n <- model$n
+  n_input_units <- n[1]
+  n_hidden_units <- n[2]
+  n_output_units <- n[3]
+
+  input_to_hidden <- mat.or.vec(n_hidden_units, n_input_units + 1)
+  counter <- 1
+  for (i in 1:n_hidden_units)
+  {
+    for (j in 1:(n_input_units + 1))
+    {
+      #The element at the i-th row and j-th column in the matrix is the weight of the connection comming from 
+      #the j-th unit in the previous (input) layer to the i-th unit in the current (hidden) layer
+      input_to_hidden[i, j] <- wts[counter]
+      counter <- counter + 1
+    }
+  } 
+  hidden_to_output <- mat.or.vec(n_output_units, n_hidden_units + 1)
+  for (i in 1:n_output_units)
+  {
+    for (j in 1:(n_hidden_units + 1))
+    {
+      #The element at the i-th row and j-th column in the matrix is the weight of the connection comming from 
+      #the j-th unit in the previous (hidden) layer to the i-th unit in the current (output) layer
+      hidden_to_output[i, j] <- wts[counter]
+      counter <- counter + 1
+    }
+  }
+  cat("input_to_hidden\n")
+  print(input_to_hidden)
+  cat("hidden_to_output\n")
+  print(hidden_to_output)
+  return(list("input_to_hidden" = input_to_hidden, "hidden_to_output" = hidden_to_output))
+}
+
+predict_test_point_nn <- function(input_to_hidden, hidden_to_output, test_point)
+{
+  test_point <- append(1, as.numeric(test_point))
+  activation_values_hidden_layer <- sigmoid(input_to_hidden%*%test_point)
+
+  activation_values_hidden_layer <- append(1, activation_values_hidden_layer)
+  activation_value_output_layer <- sigmoid(hidden_to_output%*%activation_values_hidden_layer)
+  #Internally, 1 stands for User, 0 for Bot
+  predicted <- ifelse(activation_value_output_layer >= 0.5, 'User', 'Bot')
+}
+
+
 train_validate_test_nn_single_hidden_layer <- function()
  {
    set.seed(1)
@@ -385,9 +440,14 @@ train_validate_test_nn_single_hidden_layer <- function()
    tune.out = tune.nnet(as.formula(str_formula), data = sessions[train, ], size = seq(2, 12, 2))
    
    bestmod <- tune.out$best.model
-   ypred <- predict(bestmod, newdata = sessions[test, ], type = "class")
+   
+   #ypred <- predict(bestmod, newdata = sessions[test, ], type = "class")
+   
+   connection_weights <- prepare_connection_weights(bestmod)
+   input_to_hidden <- connection_weights[["input_to_hidden"]]
+   hidden_to_output <- connection_weights[["hidden_to_output"]]
+   ypred <- apply(x[test, ], 1, function(row)predict_test_point_nn(input_to_hidden, hidden_to_output,  data.frame(t(row))))
    print(table(y.test, ypred, dnn = list('actual', 'predicted')))
-   tune.out
  }
 
 #A different implementation of neural network. TODO: Have to check how prediction works.
